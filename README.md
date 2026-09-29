@@ -1,6 +1,6 @@
 # 在线课程录播器（AI LessonRecorder）
 
-![版本](https://img.shields.io/badge/version-1.0.0--Beta-blue) ![平台](https://img.shields.io/badge/platform-Windows-informational) ![Python](https://img.shields.io/badge/Python-3.11%2B-green)
+![版本](https://img.shields.io/badge/version-1.0.0--Alpha-orange) ![平台](https://img.shields.io/badge/platform-Windows-informational) ![Python](https://img.shields.io/badge/Python-3.11%2B-green)
 
 一款 Windows 桌面端软件，用于录制在线视频课程，自动将课程音频实时转成带时间戳的逐字稿（Markdown），同时智能检测 PPT 页面翻页并截取截图、按时间戳插入到逐字稿中，最终借助 AI 将逐字稿梳理归纳为结构化的课程教程文档，并可导出为图文并茂的 Word 文档。
 
