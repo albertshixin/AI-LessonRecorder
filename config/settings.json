@@ -1,0 +1,40 @@
+{
+  "asr": {
+    "engine": "local",
+    "language": "zh",
+    "model": "small",
+    "device": "auto",
+    "compute_type": "int8",
+    "silence_sec": 0.8,
+    "min_segment_sec": 1.5,
+    "max_segment_sec": 30.0,
+    "cloud": {
+      "base_url": "https://api.openai.com/v1",
+      "api_key": "",
+      "model": "whisper-1"
+    }
+  },
+  "vision": {
+    "interval_sec": 1.5,
+    "phash_threshold": 0.18,
+    "backtrack_tol": 0.08,
+    "cooldown_sec": 3.0,
+    "capture": "primary",
+    "region": { "x": 0, "y": 0, "w": 1920, "h": 1080 }
+  },
+  "llm": {
+    "provider": "deepseek",
+    "base_url": "https://api.deepseek.com/v1",
+    "api_key": "",
+    "model": "deepseek-chat",
+    "temperature": 0.3,
+    "max_chunk_chars": 3000
+  },
+  "output": {
+    "dir": "output",
+    "keep_audio": true
+  },
+  "ui": {
+    "theme": "light"
+  }
+}
