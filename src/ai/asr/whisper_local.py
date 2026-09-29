@@ -9,12 +9,16 @@ class LocalWhisperEngine:
     """faster-whisper 本地转写引擎
 
     transcribe_segment(audio: np.ndarray float32 [-1,1] @16k, language) -> (text, conf)
+
+    模型来源：
+      - 若提供 model_path（推荐），直接加载本地目录，不再触发下载
+      - 若不提供，按 model_size 名字加载（首次会触发 HuggingFace 下载，可能阻塞）
     """
 
     name = "local-whisper"
 
     def __init__(self, model_size: str = "small", device: str = "auto",
-                 compute_type: str = "int8") -> None:
+                 compute_type: str = "int8", model_path: str | None = None) -> None:
         from faster_whisper import WhisperModel  # 延迟导入，加快启动
         if device == "auto":
             try:
@@ -24,8 +28,9 @@ class LocalWhisperEngine:
                 device = "cpu"
         if device == "cpu":
             compute_type = "int8"
-        logger.info(f"加载 Whisper 模型: {model_size} ({device}/{compute_type}) ...")
-        self.model = WhisperModel(model_size, device=device, compute_type=compute_type)
+        src = model_path or model_size
+        logger.info(f"加载 Whisper 模型: {src} ({device}/{compute_type}) ...")
+        self.model = WhisperModel(src, device=device, compute_type=compute_type)
         logger.info("Whisper 模型加载完成")
 
     def warmup(self) -> None:
@@ -50,6 +55,5 @@ class LocalWhisperEngine:
                 texts.append(t)
                 probs.append(float(seg.avg_logprob))
         text = "".join(texts)
-        # avg_logprob 越接近 0 越好，映射到 0~1 粗略置信度
         conf = max(0.0, min(1.0, 1.0 + (sum(probs) / len(probs)))) if probs else 0.0
         return text, conf

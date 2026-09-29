@@ -18,3 +18,11 @@ class EventBus(QObject):
     finished = Signal(str)
     # 音量电平 0~1
     level = Signal(float)
+    # 模型下载请求：(模型名) —— UI 应弹出进度对话框并启动下载
+    model_download_required = Signal(str, int)
+    # 模型下载进度：(描述, 已下载文件数, 总文件数)
+    model_download_progress = Signal(str, int, int)
+    # 模型下载结束：(模型名, 本地路径)
+    model_download_finished = Signal(str, str)
+    # 模型下载失败：(模型名, 错误信息)
+    model_download_error = Signal(str, str)

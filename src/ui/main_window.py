@@ -3,7 +3,7 @@
 import threading
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QObject, QThread, QTimer, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (QFileDialog, QLabel, QMainWindow, QMessageBox,
                                QProgressDialog, QStatusBar, QSplitter,
@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QFileDialog, QLabel, QMainWindow, QMessageBox,
 
 from src.app.application import AppContext
 from src.app.session_manager import SessionManager
+from src.ai.asr.model_manager import ModelManager
 from src.ui.panels.control_panel import ControlPanel
 from src.ui.panels.subtitle_panel import SubtitlePanel
 from src.ui.panels.thumbnail_panel import ThumbnailPanel
@@ -29,6 +30,26 @@ QMainWindow { background: #f5f6f8; }
 QTextEdit, QListWidget { background: white; border: 1px solid #ddd; border-radius: 6px; }
 QListWidget::item { background: #fff; border: 1px solid #eee; border-radius: 4px; }
 """
+
+
+class _DownloadWorker(QObject):
+    """后台下载 faster-whisper 模型，实时把进度发给主线程"""
+    progress = Signal(str, int, int)   # desc, current, total
+    finished = Signal(str)              # local_path
+    error = Signal(str)                 # error message
+
+    def __init__(self, model_name: str) -> None:
+        super().__init__()
+        self.model_name = model_name
+
+    def run(self) -> None:
+        try:
+            path = ModelManager.download(self.model_name,
+                                         on_progress=lambda d, c, t:
+                                             self.progress.emit(d, c, t))
+            self.finished.emit(path)
+        except Exception as e:  # noqa: BLE001
+            self.error.emit(str(e))
 
 
 class MainWindow(QMainWindow):
@@ -123,6 +144,7 @@ class MainWindow(QMainWindow):
         bus.status.connect(self.statusBar().showMessage)
         bus.error.connect(self._on_error)
         bus.finished.connect(self._on_finished)
+        bus.model_download_required.connect(self._on_download_required)
 
     # ================= 动作 =================
     def _on_start(self, name: str) -> None:
@@ -231,3 +253,66 @@ class MainWindow(QMainWindow):
                 return
             self.manager.stop()
         event.accept()
+
+    # ================= 模型下载（带进度）=================
+    def _on_download_required(self, model_name: str, size_hint_mb: int) -> None:
+        """收到下载请求：弹进度对话框 + 启动后台下载线程"""
+        self._pending_session_name = self.control.name_edit.text().strip() or "未命名课程"
+        self.control.on_state_changed("downloading")
+        self.control.btn_start.setEnabled(False)
+
+        dlg = QProgressDialog(
+            f"正在下载语音识别模型 {model_name}（约 {size_hint_mb} MB）...\n"
+            f"首次使用需联网下载到本地缓存目录（仅一次）",
+            "取消", 0, 100, self)
+        dlg.setWindowTitle("首次准备")
+        dlg.setWindowModality(Qt.WindowModal)
+        dlg.setMinimumDuration(0)
+        dlg.setValue(0)
+        self._dlg = dlg
+
+        thread = QThread(self)
+        worker = _DownloadWorker(model_name)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+
+        # 进度
+        def _on_prog(desc: str, cur: int, total: int) -> None:
+            pct = int(cur * 100 / total) if total else 0
+            dlg.setLabelText(f"正在下载 {model_name}...\n{desc}")
+            dlg.setValue(pct)
+
+        # 完成
+        def _on_done(local_path: str) -> None:
+            dlg.setValue(100)
+            dlg.close()
+            self.statusBar().showMessage(f"模型就绪：{model_name}")
+            self.control.on_state_changed("idle")
+            self.control.btn_start.setEnabled(True)
+            # 重试开始录制
+            self._on_start(self._pending_session_name)
+            thread.quit()
+            thread.wait(2000)
+
+        def _on_err(msg: str) -> None:
+            dlg.close()
+            self.control.on_state_changed("idle")
+            self.control.btn_start.setEnabled(True)
+            QMessageBox.critical(
+                self, "模型下载失败",
+                f"无法下载模型 {model_name}：\n{msg}\n\n"
+                "请检查网络或访问 huggingface 是否顺畅。\n"
+                "国内网络如访问慢，可在终端设置镜像：\n"
+                "  set HF_ENDPOINT=https://hf-mirror.com")
+            thread.quit()
+            thread.wait(2000)
+
+        worker.progress.connect(_on_prog)
+        worker.finished.connect(_on_done)
+        worker.error.connect(_on_err)
+        dlg.canceled.connect(thread.requestInterruption)
+
+        self._dlg_thread = thread
+        self._dlg_worker = worker
+        thread.start()
+        dlg.exec()  # 模态阻塞直到完成或取消

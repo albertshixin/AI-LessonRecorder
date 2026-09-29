@@ -8,6 +8,7 @@ from PySide6.QtCore import QObject
 from src.app.event_bus import EventBus
 from src.ai.asr.asr_engine import create_asr_engine
 from src.ai.asr.live_transcriber import LiveTranscriber
+from src.ai.asr.model_manager import ModelManager, MODEL_SIZE_HINT_MB
 from src.ai.llm.course_writer import CourseWriter
 from src.core.audio.loopback_recorder import LoopbackRecorder
 from src.core.audio.ring_buffer import RingBuffer
@@ -40,12 +41,14 @@ class SessionManager(QObject):
         self._finalize_lock = threading.Lock()
 
     # ================= 录制控制 =================
-    def start(self, session_name: str) -> bool:
+    def start(self, session_name: str, model_path: str | None = None) -> bool:
         if self.state != "idle":
             self.bus.status.emit("当前已在录制中")
             return False
 
         cfg = self.cfg
+        asr_cfg = cfg.as_dict()["asr"]
+
         # 创建会话
         self.paths = create_session(cfg.output_root, session_name)
         self.store = SessionStore(self.paths)
@@ -59,12 +62,22 @@ class SessionManager(QObject):
         )
 
         # 2) ASR：实时转写
+        # 本地引擎需先确保模型存在；首次会触发下载，由 UI 处理进度提示
+        if asr_cfg.get("engine", "local") == "local" and not model_path:
+            model_name = asr_cfg.get("model", "small")
+            if not ModelManager.is_downloaded(model_name):
+                size_hint = MODEL_SIZE_HINT_MB.get(model_name, 500)
+                self.bus.status.emit(f"首次使用，正在准备语音识别模型 {model_name}...")
+                self.bus.model_download_required.emit(model_name, size_hint)
+                return False
+            model_path = ModelManager.local_path(model_name)
+
         try:
-            engine = create_asr_engine(cfg.as_dict()["asr"])
+            engine = create_asr_engine(asr_cfg, model_path=model_path)
         except Exception as e:  # noqa: BLE001
             self.bus.error.emit(f"ASR 引擎初始化失败: {e}")
             return False
-        asr_cfg = cfg.as_dict()["asr"]
+
         self._transcriber = LiveTranscriber(
             ring=ring, engine=engine,
             on_transcript=self._on_transcript,

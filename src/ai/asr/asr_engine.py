@@ -14,10 +14,11 @@ class ASREngineBase:
         """可选的预热（加载模型等）"""
 
 
-def create_asr_engine(cfg: dict):
+def create_asr_engine(cfg: dict, model_path: str | None = None):
     """根据配置创建 ASR 引擎
 
     cfg 形如 config['asr']：{"engine": "local"|"cloud", ...}
+    model_path：本地模型的已下载目录路径（仅 local 引擎有效，避免再触发下载）
     """
     engine = (cfg.get("engine") or "local").lower()
     if engine == "cloud":
@@ -28,4 +29,5 @@ def create_asr_engine(cfg: dict):
         model_size=cfg.get("model", "small"),
         device=cfg.get("device", "auto"),
         compute_type=cfg.get("compute_type", "int8"),
+        model_path=model_path,
     )
