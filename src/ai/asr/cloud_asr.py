@@ -42,7 +42,8 @@ class CloudASR:
             )
             resp.raise_for_status()
             data = resp.json()
-            return data.get("text", "").strip(), 1.0
+            from src.ai.asr.whisper_local import to_simplified
+            return to_simplified(data.get("text", "").strip()), 1.0
         except Exception as e:  # noqa: BLE001
             logger.error(f"云端 ASR 调用失败: {e}")
             return "", 0.0

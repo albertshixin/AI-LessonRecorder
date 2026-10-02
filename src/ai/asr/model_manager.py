@@ -7,12 +7,22 @@
 """
 from __future__ import annotations
 
+import os
 import threading
 from typing import Callable, Optional
 
-from huggingface_hub import snapshot_download
+from src.utils.logger import logger
 
 ProgressCallback = Optional[Callable[[str, int, int], None]]
+
+# snapshot_download 需要的文件（model.bin 是真正的模型权重，必须存在）
+_REQUIRED_PATTERNS = ["*.json", "*.txt", "*.bin", "tokenizer*", "*.tiktoken", "vocabulary*"]
+
+
+def _snapshot_download(**kwargs):
+    """延迟导入 huggingface_hub（保证 HF_ENDPOINT 镜像环境变量先生效）"""
+    from huggingface_hub import snapshot_download
+    return snapshot_download(**kwargs)
 
 
 def _repo_id(model_name: str) -> str:
@@ -36,7 +46,14 @@ class _HFTqdmAdapter:
         self.total = int(total or 0)
         self.desc = desc or ""
         self.n = 0
+        self.disable = bool(disable)
+        self.ncols = None
+        self.nrows = None
         self._fire()
+
+    @property
+    def format_dict(self) -> dict:
+        return {"n": self.n, "total": self.total, "rate": None}
 
     def _fire(self) -> None:
         if _HFTqdmAdapter.callback and self.total:
@@ -49,9 +66,30 @@ class _HFTqdmAdapter:
         self.n += int(n)
         self._fire()
 
+    def refresh(self, **kwargs) -> None:
+        self._fire()
+
+    def clear(self, **kwargs) -> None:
+        pass
+
     def set_description(self, desc: str) -> None:
         self.desc = desc
         self._fire()
+
+    def set_postfix_str(self, s: str = "", refresh: bool = True) -> None:
+        pass
+
+    def set_postfix(self, **kwargs) -> None:
+        pass
+
+    def display(self, **kwargs) -> None:
+        pass
+
+    def moveto(self, *args) -> None:
+        pass
+
+    def unfreeze(self) -> None:
+        pass
 
     def close(self) -> None:
         pass
@@ -86,12 +124,37 @@ class ModelManager:
     _lock = threading.Lock()  # 同进程内只允许一个下载
 
     @classmethod
+    def apply_mirror(cls, mirror: str | None) -> None:
+        """应用 HF 镜像站 + 自动继承 Windows 系统代理
+
+        须在首次调用 huggingface_hub 前设置。
+        - mirror: 镜像地址（如 https://hf-mirror.com），留空用官方源
+        - Python 的 requests 不会自动使用 Windows 系统代理，导致直连
+          huggingface 被墙/中断；这里检测系统代理并注入环境变量。
+        """
+        if mirror:
+            os.environ["HF_ENDPOINT"] = mirror.rstrip("/")
+        # 禁用 hf 的 Xet 存储通道，走经典 HTTP 下载（自定义 tqdm 适配器兼容性最好）
+        os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+        if not any(k.upper() in ("HTTP_PROXY", "HTTPS_PROXY") for k in os.environ):
+            try:
+                import urllib.request
+                proxies = urllib.request.getproxies()  # Windows 下读注册表系统代理
+                if proxies.get("https"):
+                    os.environ["HTTPS_PROXY"] = proxies["https"]
+                if proxies.get("http"):
+                    os.environ["HTTP_PROXY"] = proxies["http"]
+                    logger.info(f"继承系统代理: {proxies['https']}")
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"系统代理解析失败: {e}")
+
+    @classmethod
     def is_downloaded(cls, name: str) -> bool:
-        """本地是否已有模型（只探测 config.json，最小成本）"""
+        """本地是否已有完整模型（必须包含 model.bin 权重文件）"""
         try:
-            snapshot_download(
+            _snapshot_download(
                 repo_id=_repo_id(name),
-                allow_patterns=["config.json"],
+                allow_patterns=["model.bin"],
                 local_files_only=True,
             )
             return True
@@ -100,27 +163,24 @@ class ModelManager:
 
     @classmethod
     def local_path(cls, name: str) -> Optional[str]:
-        """返回本地模型目录路径；未下载返回 None"""
+        """返回本地模型目录路径；未下载完整返回 None"""
         if not cls.is_downloaded(name):
             return None
-        return snapshot_download(
+        return _snapshot_download(
             repo_id=_repo_id(name),
-            allow_patterns=["config.json"],
+            allow_patterns=_REQUIRED_PATTERNS,
             local_files_only=True,
         )
 
     @classmethod
     def download(cls, name: str, on_progress: ProgressCallback = None) -> str:
-        """下载模型并返回本地目录路径"""
+        """下载模型并返回本地目录路径（支持断点续传）"""
         with cls._lock:
             _HFTqdmAdapter.callback = on_progress
             try:
-                return snapshot_download(
+                return _snapshot_download(
                     repo_id=_repo_id(name),
-                    allow_patterns=[
-                        "*.json", "*.txt", "*.bin",
-                        "tokenizer*", "*.tiktoken", "vocabulary*",
-                    ],
+                    allow_patterns=_REQUIRED_PATTERNS,
                     tqdm_class=_HFTqdmAdapter,
                 )
             finally:

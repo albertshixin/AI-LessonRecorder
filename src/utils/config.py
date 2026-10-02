@@ -15,9 +15,10 @@ DEFAULTS: dict = {
         "model": "small",
         "device": "auto",
         "compute_type": "int8",
+        "hf_mirror": "https://hf-mirror.com",  # 模型下载镜像站；留空用官方源
         "silence_sec": 0.8,
         "min_segment_sec": 1.5,
-        "max_segment_sec": 30.0,
+        "max_segment_sec": 15.0,  # 连续说话时的最大出字间隔（秒），越小越"实时"
         "cloud": {"base_url": "https://api.openai.com/v1", "api_key": "", "model": "whisper-1"},
     },
     "vision": {

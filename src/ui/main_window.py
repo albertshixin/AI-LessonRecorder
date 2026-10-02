@@ -145,13 +145,16 @@ class MainWindow(QMainWindow):
         bus.error.connect(self._on_error)
         bus.finished.connect(self._on_finished)
         bus.model_download_required.connect(self._on_download_required)
+        # 录制状态机：所有状态变化统一刷新 UI（不再各处手动调用 on_state_changed）
+        bus.state_changed.connect(self.control.on_state_changed)
+        bus.level.connect(self.control.update_level)
 
     # ================= 动作 =================
     def _on_start(self, name: str) -> None:
         self.subtitle.clear_all()
         self.thumbs.clear_all()
-        if self.manager.start(name):
-            self.control.on_state_changed("recording")
+        if self.manager.start(name, monitor=self.control.selected_monitor()):
+            # 状态变化由 SessionManager 通过 bus.state_changed 推到 ControlPanel
             self.timer.start(500)
             self.statusBar().showMessage(f"录制中：{name}")
 
@@ -167,12 +170,10 @@ class MainWindow(QMainWindow):
 
     def _on_error(self, msg: str) -> None:
         self.timer.stop()
-        self.control.on_state_changed("idle")
         QMessageBox.critical(self, "错误", msg)
 
     def _on_finished(self, session_root: str) -> None:
         self.timer.stop()
-        self.control.on_state_changed("idle")
         ret = QMessageBox.question(
             self, "录制完成",
             f"逐字稿已生成：\n{session_root}\\transcript.md\n\n"

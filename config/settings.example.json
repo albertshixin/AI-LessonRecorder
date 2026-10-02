@@ -5,6 +5,7 @@
     "model": "small",
     "device": "auto",
     "compute_type": "int8",
+    "hf_mirror": "https://hf-mirror.com",
     "silence_sec": 0.8,
     "min_segment_sec": 1.5,
     "max_segment_sec": 30.0,

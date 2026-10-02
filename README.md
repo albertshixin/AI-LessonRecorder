@@ -1,6 +1,6 @@
 # 在线课程录播器（AI LessonRecorder）
 
-![版本](https://img.shields.io/badge/version-1.0.1--Alpha-orange) ![平台](https://img.shields.io/badge/platform-Windows-informational) ![Python](https://img.shields.io/badge/Python-3.11%2B-green)
+![版本](https://img.shields.io/badge/version-1.1.0--Beta-blue) ![平台](https://img.shields.io/badge/platform-Windows-informational) ![Python](https://img.shields.io/badge/Python-3.11%2B-green)
 
 一款 Windows 桌面端软件，用于录制在线视频课程，自动将课程音频实时转成带时间戳的逐字稿（Markdown），同时智能检测 PPT 页面翻页并截取截图、按时间戳插入到逐字稿中，最终借助 AI 将逐字稿梳理归纳为结构化的课程教程文档，并可导出为图文并茂的 Word 文档。
 
@@ -114,8 +114,31 @@ AI 梳理后的教程文档结构示意：
 - [x] 阶段 3：Word 导出（逐字稿版，python-docx）
 - [x] 阶段 4：AI 梳理总结，生成结构化教程文档（Map-Reduce 分治 + `{{slide:N}}` 占位插图）
 - [x] 阶段 5：PySide6 桌面应用集成（录制控制/实时字幕/截图缩略图/设置/历史会话/崩溃恢复）
-- [ ] 阶段 6：真机实测调优（不同课程平台、翻页灵敏度、ASR 模型档位）
-- [ ] 阶段 7：打包发布（PyInstaller EXE）
+- [x] 阶段 6：真机实测调优（不同课程平台、翻页灵敏度、ASR 模型档位）
+- [x] 阶段 7：打包发布（PyInstaller EXE，GitHub Releases 下载）
+
+## 下载安装
+
+前往 [Releases](https://github.com/albertshixin/AI-LessonRecorder/releases) 页面，下载最新版 `AI-LessonRecorder-v*-win-x64.zip`，解压后直接双击 `在线课程录播器.exe` 运行（无需安装 Python）。
+
+- 首次录制会自动下载语音模型（约 483MB，走镜像 + 系统代理，支持断点续传）
+- AI 梳理总结功能需在设置中填入大语言模型 API Key
+
+## 更新日志
+
+### v1.1.0-beta（2026-10-02）
+- 暂停/继续/停止的按钮状态与录制状态机联动，收尾不再卡 UI
+- 逐字稿改为段落式结构（参考飞书纪要：连续语句合并成段，段首单时间戳）
+- 转写结果统一输出大陆简体中文（zhconv）
+- 首次启动模型下载：HF 镜像 + 自动继承系统代理 + 断点续传 + 下载进度对话框
+- CUDA 运行库缺失时自动回落 CPU，修复"转写无文字"
+- 打包产物补齐 silero VAD / zhconv 字典等数据文件
+
+### v1.0.1-alpha（2026-09-28）
+- 首次启动检测语音模型是否已下载，缺失时弹出下载进度对话框
+
+### v1.0.0-alpha（2026-09-27）
+- 首个可用版本：录音、实时转写、PPT 翻页截图、MD/Word 导出、AI 课程文档生成
 
 ## 许可证
 

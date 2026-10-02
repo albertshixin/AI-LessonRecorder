@@ -28,6 +28,9 @@ class AppContext:
         self.root = _ROOT
         setup_logger(str(_ROOT / "logs"))
         self.config = AppConfig(_ROOT / "config" / "settings.json")
+        # HF 镜像须在 huggingface_hub 首次使用前设置（下载/检测模型前）
+        from src.ai.asr.model_manager import ModelManager
+        ModelManager.apply_mirror(self.config.get("asr.hf_mirror", ""))
         logger.info(f"应用上下文初始化完成，运行根目录: {_ROOT}"
                     f"（{'打包模式' if getattr(sys, 'frozen', False) else '开发模式'}）")
 

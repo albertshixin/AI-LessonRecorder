@@ -7,7 +7,8 @@ from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-from src.core.timeline import TimelineEvent, TranscriptEvent, SlideEvent
+from src.core.timeline import TimelineEvent, SlideEvent
+from src.export.paragraph import iter_grouped
 from src.utils.timeutil import fmt_ts
 
 
@@ -31,8 +32,8 @@ def export_transcript_docx(session_root: Path, course_name: str,
     has_slide = any(isinstance(e, SlideEvent) for e in sorted_events)
     opened = False  # 是否已输出第一个小节标题
 
-    for ev in sorted_events:
-        if isinstance(ev, SlideEvent):
+    for kind, ev in iter_grouped(sorted_events):
+        if kind == "slide":
             label = f"第 {ev.index} 页" + ("（翻回）" if ev.is_backtrack else "")
             h = doc.add_heading(f"[{fmt_ts(ev.ts)}] {label}", level=2)
             for run in h.runs:
@@ -44,14 +45,15 @@ def export_transcript_docx(session_root: Path, course_name: str,
                     p = doc.add_paragraph()
                     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     p.add_run().add_picture(str(img), width=Inches(6.2))
-        elif isinstance(ev, TranscriptEvent) and ev.text.strip():
+        else:  # para：段落式文本（段首一个时间戳）
             if not opened and not has_slide:
                 doc.add_heading("[00:00:00] 开场", level=2)
                 opened = True
             para = doc.add_paragraph()
-            r = para.add_run(f"[{fmt_ts(ev.ts)}] ")
+            para.paragraph_format.first_line_indent = Pt(22)  # 首行缩进，段落感更强
+            r = para.add_run(f"[{fmt_ts(ev.start_ts)}] ")
             r.bold = True
-            para.add_run(ev.text.strip())
+            para.add_run(ev.text)
 
     out = session_root / "transcript.docx"
     doc.save(str(out))

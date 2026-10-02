@@ -5,6 +5,21 @@ import numpy as np
 from src.utils.logger import logger
 
 
+def to_simplified(text: str) -> str:
+    """繁体 → 大陆简体（Whisper 中文常输出繁体，统一转换）
+
+    zhconv 未安装时原样返回，不影响主流程。
+    """
+    if not text:
+        return text
+    try:
+        from zhconv import convert
+        return convert(text, "zh-cn")
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"简繁转换失败（{e}），原样输出")
+        return text
+
+
 class LocalWhisperEngine:
     """faster-whisper 本地转写引擎
 
@@ -29,9 +44,33 @@ class LocalWhisperEngine:
         if device == "cpu":
             compute_type = "int8"
         src = model_path or model_size
-        logger.info(f"加载 Whisper 模型: {src} ({device}/{compute_type}) ...")
-        self.model = WhisperModel(src, device=device, compute_type=compute_type)
-        logger.info("Whisper 模型加载完成")
+
+        # GPU 探测：仅检测到显卡不代表 CUDA 运行库可用（常缺 cublas64_12.dll/
+        # cudnn 等）。加载后立即做一次微型转写探测，失败自动回落 CPU，
+        # 否则每段转写都会抛异常导致"没有文字"。
+        if device == "cuda":
+            try:
+                logger.info(f"加载 Whisper 模型: {src} (cuda/{compute_type}) ...")
+                probe = WhisperModel(src, device="cuda", compute_type=compute_type)
+                self._probe_run(probe)
+                self.model = probe
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"CUDA 不可用（{e}），自动回落 CPU")
+                device, compute_type = "cpu", "int8"
+                self.model = WhisperModel(src, device=device, compute_type=compute_type)
+        else:
+            logger.info(f"加载 Whisper 模型: {src} ({device}/{compute_type}) ...")
+            self.model = WhisperModel(src, device=device, compute_type=compute_type)
+        self.device = device
+        logger.info(f"Whisper 模型加载完成（device={device}）")
+
+    @staticmethod
+    def _probe_run(model) -> None:
+        """微型转写探测：验证 CUDA 运行库真正可用"""
+        segments, _info = model.transcribe(
+            np.zeros(1600, dtype=np.float32), language="zh", beam_size=1)
+        for _ in segments:  # 触发惰性计算
+            break
 
     def warmup(self) -> None:
         try:
@@ -56,4 +95,4 @@ class LocalWhisperEngine:
                 probs.append(float(seg.avg_logprob))
         text = "".join(texts)
         conf = max(0.0, min(1.0, 1.0 + (sum(probs) / len(probs)))) if probs else 0.0
-        return text, conf
+        return to_simplified(text), conf

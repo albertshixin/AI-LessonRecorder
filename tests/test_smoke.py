@@ -70,8 +70,13 @@ def test_full_pipeline():
     assert "## [00:00:00] 第 1 页" in md or "## [00:00:00]" in md
     assert "![PPT 00:00:00]" in md
     assert "翻回" in md
+    # 段落式合并：2.0s 与 20.0s 间隔 18s > 6s → 必须分段，段首各一个时间戳
+    assert "**[00:00:02]** 各位同学大家好，今天我们讲第一章。" in md
+    assert "**[00:00:20]** 首先是基本概念。" in md
+    # 4 个转写段落 → 恰好 4 个段首时间戳（不逐句标时间）
+    assert md.count("**[00:") == 4
     paths.transcript_md.write_text(md, encoding="utf-8")
-    print(f"[OK] 事件落盘/恢复 + MD 合成 → {paths.transcript_md}")
+    print(f"[OK] 事件落盘/恢复 + MD 合成（段落式）→ {paths.transcript_md}")
 
     # 伪造两张截图供 Word 导出
     from PIL import Image

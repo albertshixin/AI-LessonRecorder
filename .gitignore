@@ -7,8 +7,10 @@ venv/
 
 # 构建产物
 build/
+build_tmp/
 dist/
 dist_debug/
+release/
 *.spec.bak
 
 # 运行时生成

@@ -21,8 +21,16 @@ def _pkg_dir(name: str):
 _pw = _pkg_dir("pyaudiowpatch")
 if _pw:
     datas.append((str(_pw), "pyaudiowpatch"))
+# faster-whisper 资产（silero VAD 的 onnx 模型等，缺失会导致转写全部失败）
+_fw = _pkg_dir("faster_whisper")
+if _fw:
+    _assets = _fw / "assets"
+    if _assets.exists():
+        datas.append((str(_assets), "faster_whisper/assets"))
 # loguru 资源
 datas += collect_data_files("loguru")
+# zhconv 简繁转换字典（zhcdict.json 缺失会导致转换静默失败，输出仍为繁体）
+datas += collect_data_files("zhconv")
 
 a = Analysis(
     [str(PROJECT / "main.py")],
@@ -35,6 +43,7 @@ a = Analysis(
         "ctranslate2",                # faster-whisper 后端
         "tokenizers",
         "onnxruntime",                # whisper VAD
+        "zhconv",                     # 繁体转简体
     ],
     hookspath=[],
     runtime_hooks=[],

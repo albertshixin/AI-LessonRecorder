@@ -41,7 +41,8 @@ class SessionManager(QObject):
         self._finalize_lock = threading.Lock()
 
     # ================= 录制控制 =================
-    def start(self, session_name: str, model_path: str | None = None) -> bool:
+    def start(self, session_name: str, model_path: str | None = None,
+              monitor: int = 1) -> bool:
         if self.state != "idle":
             self.bus.status.emit("当前已在录制中")
             return False
@@ -59,6 +60,8 @@ class SessionManager(QObject):
         self._recorder = LoopbackRecorder(
             wav_path=self.paths.audio_file,
             on_chunk=lambda ts, pcm: ring.put(ts, pcm),
+            on_level=lambda lvl: self.bus.level.emit(lvl),
+            on_status=lambda msg: self.bus.status.emit(msg),
         )
 
         # 2) ASR：实时转写
@@ -100,6 +103,7 @@ class SessionManager(QObject):
             cooldown_sec=float(v.get("cooldown_sec", 3.0)),
             capture=v.get("capture", "primary"),
             region=region,
+            monitor=int(monitor),
             get_time=lambda: self._recorder.elapsed if self._recorder else 0.0,
         )
 
@@ -117,7 +121,7 @@ class SessionManager(QObject):
         threading.Thread(target=_watch_recorder, daemon=True,
                          name="RecorderWatch").start()
 
-        self.state = "recording"
+        self._set_state("recording")
         self.paths.write_meta(finished=False, config=cfg.as_dict())
         self.bus.status.emit(f"开始录制：{self.paths.name}")
         logger.info(f"会话开始: {self.paths.root}")
@@ -127,23 +131,28 @@ class SessionManager(QObject):
         if self.state == "recording":
             self._recorder.pause()
             self._detector.pause()
-            self.state = "paused"
+            self._set_state("paused")
             self.bus.status.emit("已暂停")
 
     def resume(self) -> None:
         if self.state == "paused":
             self._recorder.resume()
             self._detector.resume()
-            self.state = "recording"
+            self._set_state("recording")
             self.bus.status.emit("继续录制")
 
     def stop(self) -> None:
+        """停止录制：UI 立刻进入 finalizing 状态；收尾工作后台线程执行"""
         with self._finalize_lock:
             if self.state in ("idle", "finalizing"):
                 return
-            self.state = "finalizing"
+            self._set_state("finalizing")
         self.bus.status.emit("正在停止并生成逐字稿 ...")
+        threading.Thread(target=self._do_stop, daemon=True,
+                         name="StopWorker").start()
 
+    def _do_stop(self) -> None:
+        """收尾：停线程 → join → 写文件 → 发 finished 信号"""
         for t in (self._recorder, self._detector):
             if t:
                 t.stop()
@@ -165,10 +174,15 @@ class SessionManager(QObject):
         except Exception:  # noqa: BLE001
             logger.exception("生成逐字稿失败")
 
-        self.state = "idle"
+        self._set_state("idle")
         self.bus.finished.emit(str(self.paths.root))
         self.bus.status.emit("录制完成")
         logger.info(f"会话结束: {self.paths.root}")
+
+    # ================= 状态变更（统一发信号）=================
+    def _set_state(self, new_state: str) -> None:
+        self.state = new_state
+        self.bus.state_changed.emit(new_state)
 
     # ================= 事件回调（工作线程） =================
     def _on_transcript(self, ev: TranscriptEvent) -> None:

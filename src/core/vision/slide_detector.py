@@ -29,11 +29,12 @@ class SlideDetector(threading.Thread):
         cooldown_sec: float = 3.0,
         capture: str = "primary",
         region=None,
+        monitor: int = 1,
         get_time=None,   #Callable[[], float]：返回当前录制相对时间（与音频时间轴对齐）
     ) -> None:
         super().__init__(daemon=True, name="SlideDetector")
         from src.core.vision.screen_capturer import ScreenCapturer
-        self.capturer = ScreenCapturer(capture, region)
+        self.capturer = ScreenCapturer(capture, region, monitor=monitor)
         self.shots_dir = Path(shots_dir)
         self.on_slide = on_slide
         self.interval = interval_sec
@@ -50,6 +51,9 @@ class SlideDetector(threading.Thread):
         self._slide_count = 0
         self._last_trigger_t = -1e9          # 冷却计时（录制时间）
         self._armed = False                  # 首帧只建立基准不触发
+        self._last_page_idx = -1             # 最近一次截图的页码（用于同页去重）
+        self._last_page_ts = -1e9            # 最近一次截图时间
+        self.same_page_dedup_sec = 30.0      # 同页重复触发去重窗口（秒）
 
     # ---------- 外部控制 ----------
     def stop(self) -> None:
@@ -96,14 +100,31 @@ class SlideDetector(threading.Thread):
 
         d, p = sig
         bd, bp = self._baseline
-        # 双哈希都显著变化才判定翻页（粗筛+复核）
+        # 双哈希任一显著变化才判定可能翻页（粗筛+复核）
         if hamming(d, bd) >= self.phash_threshold or hamming(p, bp) >= self.phash_threshold:
             if rec_ts - self._last_trigger_t < self.cooldown:
                 return  # 冷却期内忽略（过渡动画）
             # 是否翻回历史页
-            if self._is_backtrack(sig):
+            hit = self._is_backtrack(sig)
+            if hit:
+                idx, _img = hit
+                # 同页翻回去重：画面中的动态内容（讲师摄像头/动画）会导致
+                # 基准哈希频繁失配，若短时间内反复"翻回"同一页，判定为误判
+                if idx == self._last_page_idx \
+                        and rec_ts - self._last_page_ts < self.same_page_dedup_sec:
+                    self._baseline = sig   # 以当前画面为新基准，停止连续误触发
+                    self._last_trigger_t = rec_ts
+                    return
                 self._capture_now(backtrack=True, sig=sig)
             else:
+                # 与上一张截图内容几乎相同 → 动态画面噪声，不新增页
+                if self._history:
+                    ld, lp, _li, _im = self._history[-1]
+                    if hamming(d, ld) <= self.backtrack_tol \
+                            and hamming(p, lp) <= self.backtrack_tol:
+                        self._baseline = sig
+                        self._last_trigger_t = rec_ts
+                        return
                 self._capture_now(backtrack=False, sig=sig)
 
     def _is_backtrack(self, sig) -> tuple[int, str] | None:
@@ -120,8 +141,11 @@ class SlideDetector(threading.Thread):
             hit = self._is_backtrack(sig) if sig else self._is_backtrack(self._current_sig())
             if hit:
                 idx, img = hit
-                self._baseline = self._current_sig_pair()
+                # 关键：以当前画面为新基准，否则动态内容会导致连续误触发
+                self._baseline = sig if sig else self._current_sig()
                 self._last_trigger_t = rec_ts
+                self._last_page_idx = idx
+                self._last_page_ts = rec_ts
                 ev = SlideEvent(ts=rec_ts, image=img, index=idx, is_backtrack=True)
                 logger.info(f"翻回第 {idx} 页 @{fmt_ts_compact(rec_ts)}")
                 if self.on_slide:
@@ -144,6 +168,8 @@ class SlideDetector(threading.Thread):
         self._baseline = sig
         self._history.append((*sig, idx, f"screenshots/{fname}"))
         self._last_trigger_t = rec_ts
+        self._last_page_idx = idx
+        self._last_page_ts = rec_ts
         ev = SlideEvent(ts=rec_ts, image=f"screenshots/{fname}", index=idx)
         logger.info(f"翻页 → 第 {idx} 页 @{fmt_ts_compact(rec_ts)}: {fname}")
         if self.on_slide:
@@ -154,6 +180,3 @@ class SlideDetector(threading.Thread):
         small = self.capturer.grab_small(256)
         gray = bgra_to_gray(small)
         return dhash(gray), phash(gray)
-
-    def _current_sig_pair(self):
-        return self._baseline

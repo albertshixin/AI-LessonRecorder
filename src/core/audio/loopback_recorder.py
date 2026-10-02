@@ -6,6 +6,7 @@
 - 音频同时写入 WAV 存档
 """
 import threading
+import time
 import wave
 
 import numpy as np
@@ -21,19 +22,29 @@ class LoopbackRecorder(threading.Thread):
     on_chunk(ts: float, pcm: bytes)：每块回调，ts 为该块起点的录制相对时间（秒）
     """
 
-    def __init__(self, wav_path, on_chunk=None) -> None:
+    def __init__(self, wav_path, on_chunk=None, on_level=None, on_status=None) -> None:
         super().__init__(daemon=True, name="LoopbackRecorder")
         self.wav_path = str(wav_path)
         self.on_chunk = on_chunk
+        self.on_level = on_level
+        self.on_status = on_status
         self._stop_evt = threading.Event()
         self._pause_evt = threading.Event()
         self._elapsed = 0.0          # 累计有效录制时长（秒，不含暂停）
         self._level = 0.0            # 当前音量电平 0~1
         self._error: str | None = None
+        self._stream = None          # 保持引用，停止时可主动 abort 解除阻塞
 
     # ---------- 外部控制 ----------
     def stop(self) -> None:
         self._stop_evt.set()
+        # 主动停止音频流，解除可能阻塞中的 stream.read（如设备一直无数据）
+        s = self._stream
+        if s is not None:
+            try:
+                s.stop_stream()
+            except Exception:  # noqa: BLE001
+                pass
 
     def pause(self) -> None:
         self._pause_evt.set()
@@ -56,18 +67,22 @@ class LoopbackRecorder(threading.Thread):
     # ---------- 设备查找 ----------
     @staticmethod
     def _find_loopback_device(p) -> dict | None:
-        """找到默认输出声道对应的 WASAPI Loopback 设备"""
+        """找到默认输出声道对应的 WASAPI Loopback 设备
+
+        注意：paWASAPI 是 pyaudiowpatch 的模块级常量，不是 PyAudio 实例属性。
+        """
         try:
-            wasapi = p.get_host_api_info_by_type(p.paWASAPI)
-            default_out = p.get_device_info_by_index(wasapi["defaultOutputDevice"])
+            default_out = p.get_device_info_by_index(
+                p.get_default_output_device_info()["index"])
             if default_out.get("isLoopbackDevice"):
                 return default_out
-            # 查找与默认输出同名的环回设备
+            # 查找与默认输出同名的环回设备（环回设备名 = 输出名 + " [Loopback]"）
             for lb in p.get_loopback_device_info_generator():
                 if default_out["name"] in lb["name"]:
                     return lb
+            logger.warning(f"默认输出「{default_out['name']}」没有匹配的环回设备，使用第一个环回设备兜底")
         except Exception as e:  # noqa: BLE001
-            logger.error(f"查找 WASAPI 环回设备失败: {e}")
+            logger.error(f"查找默认输出对应的环回设备失败: {e}")
         # 兜底：任意一个环回设备
         try:
             for lb in p.get_loopback_device_info_generator():
@@ -111,10 +126,40 @@ class LoopbackRecorder(threading.Thread):
                 input_device_index=int(dev["index"]),
                 frames_per_buffer=1024,
             )
+            self._stream = stream
+
+            # 提示用户正在从哪个设备录音（方便排查"没声音"问题）
+            msg = f"正在录制系统声音：{dev['name']}（{src_rate}Hz）"
+            logger.info(msg)
+            if self.on_status:
+                try:
+                    self.on_status(msg)
+                except Exception:  # noqa: BLE001
+                    pass
+
+            last_data_t = time.monotonic()
+
+            # 看门狗：长时间收不到任何音频数据时提醒（如选错播放设备）
+            def _no_data_watchdog():
+                while not self._stop_evt.is_set():
+                    if time.monotonic() - last_data_t > 20:
+                        msg = ("超过 20 秒未收到系统声音。若电平条一直为 0，"
+                               "请确认课程声音是从默认输出设备播放的")
+                        logger.warning(msg)
+                        if self.on_status:
+                            try:
+                                self.on_status(msg)
+                            except Exception:  # noqa: BLE001
+                                pass
+                    self._stop_evt.wait(5)
+
+            threading.Thread(target=_no_data_watchdog, daemon=True,
+                             name="NoDataWatchdog").start()
 
             try:
                 while not self._stop_evt.is_set():
                     data = stream.read(1024, exception_on_overflow=False)
+                    last_data_t = time.monotonic()
                     if self._pause_evt.is_set():
                         continue  # 暂停：丢弃
 
@@ -127,21 +172,32 @@ class LoopbackRecorder(threading.Thread):
                     # 音量电平（RMS）
                     self._level = float(np.sqrt(np.mean(
                         (pcm16.astype(np.float32) / 32768.0) ** 2)))
+                    if self.on_level:
+                        try:
+                            self.on_level(self._level)
+                        except Exception:  # noqa: BLE001
+                            pass
 
                     wf.writeframes(pcm16.tobytes())
                     if self.on_chunk:
                         self.on_chunk(self._elapsed, pcm16.tobytes())
                     self._elapsed += n / TARGET_RATE
+                    last_data_t = time.monotonic()
             finally:
                 try:
                     stream.stop_stream()
                     stream.close()
                 except Exception:  # noqa: BLE001
                     pass
+                self._stream = None
                 wf.close()
         except Exception as e:  # noqa: BLE001
-            self._error = f"录音失败: {e}"
-            logger.exception("环回录音异常")
+            if self._stop_evt.is_set():
+                # 主动停止时 abort 音频流可能抛 -9999 Unanticipated host error，属正常关停
+                logger.info(f"录音流已停止（{e}）")
+            else:
+                self._error = f"录音失败: {e}"
+                logger.exception("环回录音异常")
         finally:
             p.terminate()
             logger.info("录音线程已退出")

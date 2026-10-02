@@ -12,6 +12,8 @@ class EventBus(QObject):
     slide_added = Signal(str, int)
     # 状态消息
     status = Signal(str)
+    # 录制状态变化："idle" | "recording" | "paused" | "finalizing"
+    state_changed = Signal(str)
     # 录音错误（致命）
     error = Signal(str)
     # 录制完成：会话根目录
