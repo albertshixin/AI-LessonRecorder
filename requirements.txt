@@ -7,3 +7,4 @@ mss>=9.0.0
 python-docx>=1.1.0
 requests>=2.31.0
 loguru>=0.7.0
+zhconv>=1.4.0

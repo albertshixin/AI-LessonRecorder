@@ -1,6 +1,6 @@
 # 在线课程录播器（AI LessonRecorder）
 
-![版本](https://img.shields.io/badge/version-1.1.0-brightgreen) ![平台](https://img.shields.io/badge/platform-Windows-informational) ![Python](https://img.shields.io/badge/Python-3.11%2B-green)
+![版本](https://img.shields.io/badge/version-1.2.0-brightgreen) ![平台](https://img.shields.io/badge/platform-Windows-informational) ![Python](https://img.shields.io/badge/Python-3.11%2B-green)
 
 一款 Windows 桌面端软件，用于录制在线视频课程，自动将课程音频实时转成带时间戳的逐字稿（Markdown），同时智能检测 PPT 页面翻页并截取截图、按时间戳插入到逐字稿中，最终借助 AI 将逐字稿梳理归纳为结构化的课程教程文档，并可导出为图文并茂的 Word 文档。
 
@@ -125,6 +125,12 @@ AI 梳理后的教程文档结构示意：
 - AI 梳理总结功能需在设置中填入大语言模型 API Key
 
 ## 更新日志
+
+### v1.2.0（2026-10-05）
+- 离线重转写：录制完成后可用 audio.wav 重新转写整节课，产出更高精度逐字稿
+- 全局快捷键：录制时窗口失焦（正在看课程播放器）仍可控制开始/暂停/停止
+- API Key 加密存储：Windows DPAPI 加密落盘，不再明文保存
+- 测试体系扩充至 8 套（分段、视觉算法、UI、打包冒烟等），run_all.py 一键全量回归
 
 ### v1.1.0（2026-10-05）正式版
 - 小范围公测通过，正式发布；功能与 v1.1.0-beta 一致
