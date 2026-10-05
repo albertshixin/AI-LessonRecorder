@@ -122,6 +122,25 @@ class ControlPanel(QWidget):
         """当前选择的显示器序号（mss 序号，1=主显示器）"""
         return self.monitor_combo.currentData() or 1
 
+    def apply_hotkey_hints(self, registered: list[str]) -> None:
+        """把实际生效的全局热键回写到按钮 tooltip
+
+        `registered` 形如 ["F9=手动截图", "F10=暂停/继续", "F11=停止录制"]。
+        只提示真正注册成功的键位，避免"标了快捷键但按了没反应"的困惑。
+        """
+        mapping = {"F9": self.btn_shot, "F10": self.btn_pause,
+                   "F11": self.btn_stop}
+        base = {"F9": "手动截图", "F10": "暂停/继续", "F11": "停止录制"}
+        for item in registered:
+            key = item.split("=", 1)[0]
+            btn = mapping.get(key)
+            if btn:
+                btn.setToolTip(f"{base[key]}　快捷键 {key}（全局，窗口失焦时可用）")
+        # 未注册成功的键位明确告知"只能用按钮"
+        for key, btn in mapping.items():
+            if not btn.toolTip():
+                btn.setToolTip(f"{base[key]}　（全局热键 {key} 未注册：可能被其他程序占用）")
+
     def on_state_changed(self, state: str) -> None:
         self._set_state(state)
 

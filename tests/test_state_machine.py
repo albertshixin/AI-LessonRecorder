@@ -68,6 +68,7 @@ def main() -> None:
 
         print(f"[OK] state_changed 信号序列: {states}")
         print("[OK] 防重入 stop 行为正确")
+        print("RESULT: PASS")
 
 
 if __name__ == "__main__":

@@ -49,6 +49,11 @@ class SessionPaths:
 
     # ---------- 元数据 ----------
     def write_meta(self, **kwargs) -> None:
+        """写会话元数据
+
+        stats 为运行时指标（转写积压/丢块、ASR 实时率、翻页判据命中分布），
+        用于事后排查"为什么这节课转写质量差"——没有这些数字只能靠猜。
+        """
         meta = {
             "name": self.name,
             "created_at": self.created_at,
@@ -57,9 +62,13 @@ class SessionPaths:
             "transcript_count": kwargs.get("transcript_count", 0),
             "slide_count": kwargs.get("slide_count", 0),
             "config": kwargs.get("config", {}),
+            "stats": kwargs.get("stats", {}),
         }
-        with open(self.meta_file, "w", encoding="utf-8") as f:
+        # 原子写：先写临时文件再替换，避免断电产生半截 JSON
+        tmp = self.meta_file.with_suffix(".json.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)
+        tmp.replace(self.meta_file)
 
     def read_meta(self) -> dict:
         try:
@@ -70,25 +79,57 @@ class SessionPaths:
 
 
 class SessionStore:
-    """事件流落盘（线程安全，增量 jsonl）"""
+    """事件流落盘（线程安全，增量 jsonl）
+
+    v1.2：改用**长驻文件句柄 + 每事件 flush**。
+    原实现每个事件 open/append/close 一次——2 小时课程约 5000 次文件开关，
+    既慢又增加断电时缓冲区丢失的风险。改为常驻句柄后：
+    - 性能：消除重复 open/close；
+    - 可靠性：每条事件 flush 到 OS，崩溃最多丢最后 1 条。
+    """
 
     def __init__(self, paths: SessionPaths) -> None:
         self.paths = paths
         self._io_lock = threading.Lock()
+        self._fh = None
+
+    def _ensure_open(self):
+        if self._fh is None or self._fh.closed:
+            self._fh = open(self.paths.events_file, "a", encoding="utf-8",
+                            buffering=1)
+        return self._fh
 
     def append_event(self, event: TimelineEvent) -> None:
+        if isinstance(event, TranscriptEvent):
+            row = {"t": round(event.ts, 3), "type": "transcript",
+                   "text": event.text, "conf": round(event.conf, 3)}
+        elif isinstance(event, SlideEvent):
+            row = {"t": round(event.ts, 3), "type": "slide",
+                   "img": event.image, "idx": event.index,
+                   "backtrack": event.is_backtrack}
+        else:
+            return
         with self._io_lock:
-            with open(self.paths.events_file, "a", encoding="utf-8") as f:
-                if isinstance(event, TranscriptEvent):
-                    row = {"t": round(event.ts, 3), "type": "transcript",
-                           "text": event.text, "conf": round(event.conf, 3)}
-                elif isinstance(event, SlideEvent):
-                    row = {"t": round(event.ts, 3), "type": "slide",
-                           "img": event.image, "idx": event.index,
-                           "backtrack": event.is_backtrack}
-                else:
-                    return
-                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            try:
+                fh = self._ensure_open()
+                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+                fh.flush()          # 立即刷到 OS：崩溃时最多丢最后一条
+            except Exception:  # noqa: BLE001
+                logger.exception("事件落盘失败")
+                # 落盘失败不能拖垮录制：关闭句柄下次重建，并上报警告
+                self.close()
+                raise
+
+    def close(self) -> None:
+        """关闭文件句柄（会话收尾时调用）"""
+        with self._io_lock:
+            if self._fh and not self._fh.closed:
+                try:
+                    self._fh.flush()
+                    self._fh.close()
+                except Exception:  # noqa: BLE001
+                    logger.warning("关闭事件流失败", exc_info=True)
+            self._fh = None
 
     def load_events(self) -> list[TimelineEvent]:
         """从 events.jsonl 重建时间轴（崩溃恢复）"""

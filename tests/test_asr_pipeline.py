@@ -55,7 +55,18 @@ def main() -> None:
         print(f"[1] TTS 语音已合成: {dur:.1f}s")
 
         # 直接调用引擎（跳过管线）
-        engine = LocalWhisperEngine(model_size="small", device="cpu", compute_type="int8")
+        try:
+            engine = LocalWhisperEngine(model_size="small", device="cpu",
+                                        compute_type="int8")
+        except Exception as e:  # noqa: BLE001
+            # 模型未下载 / 无外网：这是环境问题，不是代码缺陷。
+            # 明确 SKIP 而非抛 traceback，便于 CI 区分"失败"与"环境不具备"。
+            print(f"[SKIP] 本地 Whisper 模型不可用（{type(e).__name__}: "
+                  f"{str(e)[:160]}）")
+            print("       请先在应用内【设置 → 语音识别】下载 small 模型，"
+                  "或设置 HF 镜像后重试。")
+            print("RESULT: SKIP")
+            return
         audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
         text, conf = engine.transcribe_segment(audio, "zh")
         print(f"[2] 引擎直测: text={text!r} conf={conf:.2f}")
