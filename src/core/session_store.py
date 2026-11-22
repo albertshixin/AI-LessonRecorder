@@ -157,14 +157,51 @@ class SessionStore:
         return events
 
 
+def _existing_session_names(output_root: Path) -> set[str]:
+    """输出目录里已有会话的课程名集合（去掉时间戳前缀）"""
+    if not output_root.exists():
+        return set()
+    return {session_name_of(d) for d in output_root.iterdir() if d.is_dir()}
+
+
+def _next_free_name(existing: set[str], base: str) -> str:
+    """同名课程顺延序号：首次用原名，再次录制为 名称-1、名称-2 …
+
+    场景：录了一半停止，再点开始且没改课程名 —— 上一次的 audio.wav /
+    transcript.md 已经存在，必须另起一份并编号，否则两份内容混在一起、
+    也无法区分哪份是最新的。
+    """
+    if base not in existing:
+        return base
+    n = 1
+    while f"{base}-{n}" in existing:
+        n += 1
+    return f"{base}-{n}"
+
+
 def create_session(output_root: Path, raw_name: str) -> SessionPaths:
-    """创建新的会话目录：output/{时间}_{课程名}/"""
+    """创建新的会话目录：output/{时间}_{课程名}/（同名自动加 -1/-2 序号）"""
     stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    root = output_root / f"{stamp}_{safe_name(raw_name)}"
-    paths = SessionPaths(root=root, name=safe_name(raw_name))
+    base = safe_name(raw_name)
+    name = _next_free_name(_existing_session_names(output_root), base)
+    root = output_root / f"{stamp}_{name}"
+    # 极端情况：同一秒内同名启动（目录恰好同名）→ 继续顺延，绝不覆盖上一次的成果
+    n = 1
+    while root.exists():
+        name = f"{base}-{n}"
+        root = output_root / f"{stamp}_{name}"
+        n += 1
+    paths = SessionPaths(root=root, name=name)
     paths.ensure_dirs()
+    if name != base:
+        logger.info(f"课程名「{base}」已存在历史会话，本次记为「{name}」")
     logger.info(f"创建会话目录: {root}")
     return paths
+
+
+def session_name_of(root: Path) -> str:
+    """由会话目录名反推课程名（去掉时间戳前缀）"""
+    return root.name.split("_", 2)[-1] if "_" in root.name else root.name
 
 
 def scan_sessions(output_root: Path) -> list[SessionPaths]:
@@ -174,6 +211,5 @@ def scan_sessions(output_root: Path) -> list[SessionPaths]:
         return result
     for d in sorted(output_root.iterdir(), reverse=True):
         if d.is_dir() and (d / "events.jsonl").exists():
-            name = d.name.split("_", 2)[-1] if "_" in d.name else d.name
-            result.append(SessionPaths(root=d, name=name))
+            result.append(SessionPaths(root=d, name=session_name_of(d)))
     return result

@@ -21,17 +21,26 @@ class ControlPanel(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(12, 12, 12, 12)
 
-        # 第一行：课程名 + 截屏显示器选择
+        # 第一行：课程名 + 采集来源（屏幕 / 应用窗口）
         row1 = QHBoxLayout()
         row1.addWidget(QLabel("课程名称："))
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("例如：机器学习入门 第3讲（用于命名输出目录与文档）")
         row1.addWidget(self.name_edit, stretch=1)
-        row1.addWidget(QLabel("截屏屏幕："))
-        self.monitor_combo = QComboBox()
-        self.monitor_combo.setMinimumWidth(180)
-        self.refresh_monitors()
-        row1.addWidget(self.monitor_combo)
+        row1.addWidget(QLabel("采集来源："))
+        self.source_combo = QComboBox()
+        self.source_combo.setMinimumWidth(240)
+        self.source_combo.setToolTip(
+            "屏幕：截取整个显示器（会包含弹出的其他窗口）\n"
+            "窗口：只截取所选应用自身界面，被遮挡/弹窗不影响\n"
+            "（设置里配置过“区域”时，选第一项沿用区域）")
+        btn_refresh_src = QPushButton("↻")
+        btn_refresh_src.setFixedWidth(32)
+        btn_refresh_src.setToolTip("刷新窗口列表")
+        btn_refresh_src.clicked.connect(self.refresh_sources)
+        self.refresh_sources()
+        row1.addWidget(self.source_combo)
+        row1.addWidget(btn_refresh_src)
         lay.addLayout(row1)
 
         # 第二行：按钮 + 计时
@@ -107,20 +116,44 @@ class ControlPanel(QWidget):
         self.level_bar.setValue(v)
 
     def refresh_monitors(self) -> None:
-        """枚举显示器填充下拉框（保持当前选择）"""
-        prev = self.selected_monitor() if hasattr(self, "monitor_combo") else 1
-        self.monitor_combo.clear()
+        """兼容旧调用：刷新采集来源列表"""
+        if hasattr(self, "source_combo"):
+            self.refresh_sources()
+
+    def refresh_sources(self) -> None:
+        """填充采集来源：屏幕显示器 + 当前打开的应用窗口（保持当前选择）"""
+        prev = self.selected_source() if hasattr(self, "source_combo") else None
+        combo = self.source_combo
+        combo.blockSignals(True)
+        combo.clear()
+        # 第一项：跟随设置（primary/region，行为与旧版一致）
+        combo.addItem("跟随设置（显示器/区域）", None)
         for idx, name, _w, _h in ScreenCapturer.list_monitors():
-            self.monitor_combo.addItem(name, idx)
-        if self.monitor_combo.count() == 0:
-            self.monitor_combo.addItem("主显示器", 1)
-        # 恢复上次选择
-        pos = self.monitor_combo.findData(prev)
-        self.monitor_combo.setCurrentIndex(pos if pos >= 0 else 0)
+            combo.addItem(f"🖥 屏幕：{name}", ("monitor", idx))
+        for title, w, h in ScreenCapturer.list_windows():
+            t = title if len(title) <= 34 else title[:33] + "…"
+            combo.addItem(f"🪟 窗口：{t}（{w}x{h}）", ("window", title))
+        combo.blockSignals(False)
+        # 恢复上次选择（按 data 匹配；窗口已关闭则回到第一项）
+        pos = 0
+        if prev is not None:
+            for i in range(combo.count()):
+                if combo.itemData(i) == prev:
+                    pos = i
+                    break
+        combo.setCurrentIndex(pos)
+
+    def selected_source(self) -> tuple[str, object] | None:
+        """当前采集来源：None=跟随设置 | ("monitor", 序号) | ("window", 窗口标题)"""
+        data = self.source_combo.currentData() if hasattr(self, "source_combo") else None
+        return data
 
     def selected_monitor(self) -> int:
-        """当前选择的显示器序号（mss 序号，1=主显示器）"""
-        return self.monitor_combo.currentData() or 1
+        """兼容旧调用：所选显示器序号（窗口模式返回 1）"""
+        src = self.selected_source()
+        if src and src[0] == "monitor":
+            return int(src[1])
+        return 1
 
     def apply_hotkey_hints(self, registered: list[str]) -> None:
         """把实际生效的全局热键回写到按钮 tooltip

@@ -220,6 +220,92 @@ def test_slide_events(tmp: Path) -> None:
           f"全程无错误（errors={det.stats_counter.get('capture_errors', 0)}）")
 
 
+def test_backtrack_not_recorded(tmp: Path) -> None:
+    """翻回历史页：默认不截图、不发事件（不重复记录）"""
+    print("\n[6] 翻回页不重复记录")
+    A, B = make_bgra([200, 150]), make_bgra([80, 60], seed=2)
+    events = []
+    frames = [A] * 4 + [B] * 4 + [A] * 10
+    det = SlideDetector(shots_dir=tmp / "t6", on_slide=events.append,
+                        interval_sec=0.05, cooldown_sec=0.0,
+                        record_backtrack=False)
+    det.capturer = FakeCapturer(frames)
+    det.start()
+    ok = wait_until(lambda: det.stats_counter.get("backtracks", 0) >= 1, timeout=8)
+    time.sleep(0.2)
+    det.stop()
+    det.join(timeout=5)
+
+    check(ok, f"翻回被识别（backtracks={det.stats_counter.get('backtracks')}）")
+    check(len(events) == 2,
+          f"只记录 2 个事件（首页 + B 页，翻回不重复）实际 {len(events)}")
+    check(not any(e.is_backtrack for e in events), "无翻回事件混入")
+    shots = list((tmp / "t6").glob("*.png"))
+    check(len(shots) == 2, f"只落盘 2 张截图，实际 {len(shots)}")
+
+    # 开启 record_backtrack 时才记录翻回（旧行为，供需要时使用）
+    events2 = []
+    det2 = SlideDetector(shots_dir=tmp / "t6b", on_slide=events2.append,
+                         interval_sec=0.05, cooldown_sec=0.0,
+                         record_backtrack=True)
+    det2.capturer = FakeCapturer([A] * 4 + [B] * 4 + [A] * 10)
+    det2.start()
+    wait_until(lambda: det2.stats_counter.get("backtracks", 0) >= 1, timeout=8)
+    time.sleep(0.2)
+    det2.stop()
+    det2.join(timeout=5)
+    check(len(events2) == 3 and events2[-1].is_backtrack,
+          f"record_backtrack=True 时记录翻回事件（实际 {len(events2)} 个）")
+
+
+def _solid_bgra(value: float) -> np.ndarray:
+    """纯色 BGRA 帧（切换时的黑屏 / 白屏）"""
+    h, w = 200, 320
+    img = np.zeros((h, w, 4), dtype=np.uint8)
+    img[..., 0] = img[..., 1] = img[..., 2] = value
+    img[..., 3] = 255
+    return img
+
+
+def test_blank_transition_not_saved(tmp: Path) -> None:
+    """切换过渡帧（全黑/全白）必须被丢弃：不落盘、不发事件、不占页码"""
+    print("\n[7] 纯色过渡帧不截图")
+    A, B = make_bgra([200, 150]), make_bgra([80, 60], seed=2)
+    BLACK, WHITE = _solid_bgra(0.0), _solid_bgra(255.0)
+
+    events = []
+    # A 稳定 → 切到黑屏（过渡）→ 真正翻到 B；黑屏期间不得产生任何截图
+    frames = ([A] * 4 + [BLACK] * 6 + [B] * 6)
+    det = SlideDetector(shots_dir=tmp / "t7", on_slide=events.append,
+                        interval_sec=0.05, cooldown_sec=0.0)
+    det.capturer = FakeCapturer(frames)
+    det.start()
+    wait_until(lambda: len(events) >= 2, timeout=8)
+    time.sleep(0.3)
+    det.stop()
+    det.join(timeout=5)
+
+    shots = list((tmp / "t7").glob("*.png"))
+    check(det.stats_counter.get("rejected_blank", 0) > 0,
+          f"纯色帧被识别并丢弃（rejected_blank="
+          f"{det.stats_counter.get('rejected_blank')}）")
+    check(len(events) == 2,
+          f"只产生 2 个事件（首页 + B 页），黑屏未混入（实际 {len(events)}）")
+    check(len(shots) == 2, f"只落盘 2 张截图，黑屏未落盘（实际 {len(shots)}）")
+    check(det.stats_counter.get("capture_errors", 0) == 0,
+          "丢弃路径未引发错误")
+
+    # 手动截图(F9) 时若正对黑屏，同样不得保存
+    events2 = []
+    det2 = SlideDetector(shots_dir=tmp / "t7b", on_slide=events2.append,
+                         interval_sec=0.05, cooldown_sec=0.0)
+    det2.capturer = FakeCapturer([BLACK] * 5)
+    det2._capture_now(backtrack=False, sig=None)      # 等价于按了 F9
+    check(list((tmp / "t7b").glob("*.png")) == [], "手动截图遇到黑屏时不保存")
+    check(det2.stats_counter.get("rejected_blank", 0) >= 1,
+          "手动截图丢弃也计入统计")
+
+
 def main() -> int:
     print("=" * 70)
     print("翻页检测线程集成测试")
@@ -231,6 +317,8 @@ def main() -> int:
         test_capture_now_gray_preserved(tmp)
         test_error_circuit_breaker(tmp)
         test_slide_events(tmp)
+        test_backtrack_not_recorded(tmp)
+        test_blank_transition_not_saved(tmp)
 
     print("\n" + "=" * 70)
     print(f"结果：{PASSED} 通过，{len(FAILURES)} 失败")

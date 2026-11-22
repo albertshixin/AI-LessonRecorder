@@ -1,6 +1,6 @@
 # 在线课程录播器（AI LessonRecorder）
 
-![版本](https://img.shields.io/badge/version-1.2.0-brightgreen) ![平台](https://img.shields.io/badge/platform-Windows-informational) ![Python](https://img.shields.io/badge/Python-3.11%2B-green)
+![版本](https://img.shields.io/badge/version-1.3.0-brightgreen) ![平台](https://img.shields.io/badge/platform-Windows-informational) ![Python](https://img.shields.io/badge/Python-3.11%2B-green)
 
 一款 Windows 桌面端软件，用于录制在线视频课程，自动将课程音频实时转成带时间戳的逐字稿（Markdown），同时智能检测 PPT 页面翻页并截取截图、按时间戳插入到逐字稿中，最终借助 AI 将逐字稿梳理归纳为结构化的课程教程文档，并可导出为图文并茂的 Word 文档。
 
@@ -125,6 +125,22 @@ AI 梳理后的教程文档结构示意：
 - AI 梳理总结功能需在设置中填入大语言模型 API Key
 
 ## 更新日志
+
+### v1.3.0（2026-11-22）
+- **修复录制中停止后再开始卡死**：根因是 CUDA 探测失败后二次重试会死锁在
+  `encode()`，现已改为"结论只判定一次"，且 ASR 引擎按配置缓存复用，
+  第二次开始录制不再重复加载模型（约 2.4s → 瞬时）
+- **修复蓝牙耳机断连导致软件崩溃**：设备被移除后不再对失效音频流调用
+  PortAudio（该调用会访问无效内存使进程崩溃）；录音改为非阻塞轮询读取
+- 蓝牙断连自愈：设备恢复后自动重开并**接着写同一个 WAV**，时间轴连续；
+  超过 90 秒未恢复才结束录音，已录内容完整保留
+- 同名课程再次录制自动加序号（`课程-1`、`课程-2`…），多次停止/开始互不覆盖；
+  暂停→继续仍写同一份文件
+- 翻页截图丢弃切换过渡帧：全黑/全白等纯色画面不再存入截图与文档
+- 新增窗口采集模式：只截取所选应用自身界面，被遮挡/弹窗不影响
+- 输出目录与配置文件可视化：状态栏常驻可点击链接，操作后自动打开所在目录
+- AI 教程文档生成（逐字稿 → 结构化 Word 教程，Map-Reduce 分治 + 截图占位插图）
+- 测试体系扩充至 12 套（停止后重录、设备断连自愈、窗口采集、输出配置等）
 
 ### v1.2.0（2026-10-05）
 - 离线重转写：录制完成后可用 audio.wav 重新转写整节课，产出更高精度逐字稿

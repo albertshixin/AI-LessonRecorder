@@ -37,8 +37,9 @@ import numpy as np
 from PIL import Image
 
 from src.core.timeline import SlideEvent
-from src.core.vision.change_algo import (bgra_to_gray, dhash, diff_ratio, hamming,
-                                         phash, ssim)
+from src.core.vision.change_algo import (bgra_to_gray, dhash, diff_ratio,
+                                         frame_contrast, hamming,
+                                         is_blank_frame, phash, ssim)
 from src.utils.logger import logger
 from src.utils.timeutil import fmt_ts_compact
 
@@ -49,6 +50,7 @@ DEFAULT_MIN_DIFF_RATIO = 0.02# 差异像素占比下限：低于此值判为噪�
 DEFAULT_SSIM_THRESHOLD = 0.95     # SSIM 下限：高于此值判为"结构未变"
 DEFAULT_BACKTRACK_TOL = 0.08# 与历史页判为同一页的 pHash 容差
 DEFAULT_COOLDOWN_SEC = 3.0
+DEFAULT_BLANK_SPREAD_TH = 10.0    # 明暗跨度下限：低于此值判为纯色过渡帧（黑屏/白屏）
 
 # 连续截图失败多少次后熔断（防止无显示设备/会话销毁时无限刷 traceback）
 _MAX_CONSECUTIVE_ERRORS = 30
@@ -70,16 +72,20 @@ class SlideDetector(threading.Thread):
         cooldown_sec: float = DEFAULT_COOLDOWN_SEC,
         min_diff_ratio: float = DEFAULT_MIN_DIFF_RATIO,
         ssim_threshold: float = DEFAULT_SSIM_THRESHOLD,
+        blank_spread_threshold: float = DEFAULT_BLANK_SPREAD_TH,
         capture: str = "primary",
         region=None,
         monitor: int = 1,
+        window_title: str | None = None,
         roi=None,
         get_time=None,          # Callable[[], float]：当前录制相对时间（与音频时间轴对齐）
         small_width: int = DEFAULT_SMALL_WIDTH,
+        record_backtrack: bool = False,
     ) -> None:
         super().__init__(daemon=True, name="SlideDetector")
         from src.core.vision.screen_capturer import ScreenCapturer
-        self.capturer = ScreenCapturer(capture, region, monitor=monitor)
+        self.capturer = ScreenCapturer(capture, region, monitor=monitor,
+                                       window_title=window_title)
         self.shots_dir = Path(shots_dir)
         # 目录必须在此处创建：历史缺陷是只假定create_session 已建好目录，
         # 一旦目录缺失（清理过output、手动指定路径），每次截图保存都抛
@@ -95,7 +101,9 @@ class SlideDetector(threading.Thread):
         self.cooldown = float(cooldown_sec)
         self.min_diff_ratio = float(min_diff_ratio)
         self.ssim_th = float(ssim_threshold)
+        self.blank_spread_th = float(blank_spread_threshold)  # 纯色过渡帧判据
         self.roi = roi            # (x, y, w, h) 归一化内容区，排除播放器控制栏
+        self.record_backtrack = bool(record_backtrack)  # 翻回是否记入时间轴（默认不记）
         self.get_time = get_time or (lambda: time.time())
         self.small_width = int(small_width)
 
@@ -116,7 +124,8 @@ class SlideDetector(threading.Thread):
 
         # 运行时指标
         self.stats_counter = {"ticks": 0, "captures": 0, "backtracks": 0,
-                              "rejected_noise": 0, "rejected_cursor": 0}
+                              "rejected_noise": 0, "rejected_cursor": 0,
+                              "rejected_blank": 0}
 
     # ---------- 外部控制 ----------
     def stop(self) -> None:
@@ -200,9 +209,20 @@ class SlideDetector(threading.Thread):
     def _tick(self) -> None:
         small = self.capturer.grab_small(self.small_width)
         gray = self._apply_roi(bgra_to_gray(small))
-        sig = (dhash(gray), phash(gray))
         rec_ts = self.get_time()
         self.stats_counter["ticks"] += 1
+
+        # 纯色过渡帧（切页/加载时的全黑屏、全白屏、淡入淡出中间灰）：
+        # 既不判翻页，也**不更新基准帧**——保持上一页的基准，
+        # 等真正的页面出现时再与上一页比对，否则会把黑屏当成"新的一页"存进逐字稿。
+        if is_blank_frame(gray, self.blank_spread_th):
+            self.stats_counter["rejected_blank"] += 1
+            logger.debug(
+                f"跳过纯色过渡帧 @{fmt_ts_compact(rec_ts)}"
+                f"（明暗跨度 {frame_contrast(gray):.1f} < {self.blank_spread_th}）")
+            return
+
+        sig = (dhash(gray), phash(gray))
 
         if not self._armed:
             self._baseline_sig = sig
@@ -296,6 +316,11 @@ class SlideDetector(threading.Thread):
                 self._last_page_idx = idx
                 self._last_page_ts = rec_ts
                 self.stats_counter["backtracks"] += 1
+                if not self.record_backtrack:
+                    # 翻回不重复记录：只更新基准状态，不截图、不发事件。
+                    # 避免逐字稿/Word 里出现重复小节与同一张截图被反复插入。
+                    logger.info(f"翻回第 {idx} 页 @{fmt_ts_compact(rec_ts)}（不重复记录）")
+                    return
                 ev = SlideEvent(ts=rec_ts, image=img, index=idx, is_backtrack=True)
                 logger.info(f"翻回第 {idx} 页 @{fmt_ts_compact(rec_ts)}")
                 if self.on_slide:
@@ -305,6 +330,18 @@ class SlideDetector(threading.Thread):
 
         # 新页：原始分辨率截图
         full = self.capturer.grab_full()
+
+        # 落盘前最后一道闸：待存帧本身是纯色过渡帧（黑屏/白屏）→ 直接丢弃，
+        # 不占编号、不写文件、不发事件。覆盖手动截图(F9)与首页抓取这两条路径。
+        # 判据用分位跨度，与分辨率无关，故可直接作用于全分辨率帧。
+        if is_blank_frame(bgra_to_gray(full), self.blank_spread_th):
+            self.stats_counter["rejected_blank"] += 1
+            logger.info(
+                f"丢弃纯色过渡帧 @{fmt_ts_compact(rec_ts)}"
+                f"（明暗跨度 {frame_contrast(bgra_to_gray(full)):.1f}"
+                f" < {self.blank_spread_th}）")
+            return
+
         self._slide_count += 1
         idx = self._slide_count
         fname = f"{fmt_ts_compact(rec_ts)}_slide_{idx:03d}.png"

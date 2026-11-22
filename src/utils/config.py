@@ -47,8 +47,11 @@ DEFAULTS: dict = {
         "ssim_threshold": 0.95,        # SSIM 下限：高于此值判为"结构未变"
         "backtrack_tol": 0.08,         # 翻回复用容差
         "cooldown_sec": 3.0,           # 翻页冷却防抖
-        "capture": "primary",          # primary | region
+        "blank_spread_threshold": 10.0,  # 明暗跨度下限：低于此值判为纯色过渡帧（黑屏/白屏），直接丢弃不截图
+        "capture": "primary",          # primary | region | window（指定应用窗口）
         "region": {"x": 0, "y": 0, "w": 1920, "h": 1080},
+        "window_title": "",            # window 模式下要采集的应用窗口标题
+        "record_backtrack": False,     # 翻回历史页时是否记录（默认不记，避免重复截图）
         # 内容区 ROI（归一化 0~1），用于排除播放器控制栏；null 表示全画面
         "roi": None,
     },

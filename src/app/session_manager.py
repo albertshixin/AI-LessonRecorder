@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QObject
@@ -35,7 +36,8 @@ from src.export.word_exporter import export_transcript_docx
 from src.utils.config import AppConfig
 from src.utils.logger import logger
 
-JOIN_TIMEOUT_SEC = 30
+JOIN_TIMEOUT_SEC = 20          # 单个工作线程的最长收尾等待
+STOP_WATCHDOG_SEC = 45         # 收尾总兜底：超时强制回 idle，绝不让界面卡在"正在停止"
 
 
 class SessionManager(QObject):
@@ -68,7 +70,9 @@ class SessionManager(QObject):
             logger.warning("自检模式已禁用录制启动（LESSONRECORDER_SELFTEST=1）")
             return False
         if self.state != "idle":
-            self.bus.status.emit("当前已在录制中")
+            self.bus.status.emit(
+                "正在结束上一次录制，请稍候…" if self.state == "finalizing"
+                else "当前已在录制中")
             return False
 
         cfg = self.cfg
@@ -133,10 +137,13 @@ class SessionManager(QObject):
                 cooldown_sec=float(v.get("cooldown_sec", 3.0)),
                 min_diff_ratio=float(v.get("min_diff_ratio", 0.02)),
                 ssim_threshold=float(v.get("ssim_threshold", 0.95)),
+                blank_spread_threshold=float(v.get("blank_spread_threshold", 10.0)),
                 capture=v.get("capture", "primary"),
                 region=region,
                 monitor=int(monitor),
+                window_title=v.get("window_title") or None,
                 roi=roi,
+                record_backtrack=bool(v.get("record_backtrack", False)),
                 get_time=lambda: self._recorder.elapsed if self._recorder else 0.0,
             )
         except Exception as e:  # noqa: BLE001
@@ -241,6 +248,30 @@ class SessionManager(QObject):
         self.bus.status.emit("正在停止并生成逐字稿 ...")
         threading.Thread(target=self._do_stop, daemon=True,
                          name="StopWorker").start()
+        # 兜底看门狗：任何原因（线程卡死、驱动无响应）导致收尾不返回时，
+        # 强制回到 idle 并补发 finished，保证用户一定能再次开始录制。
+        threading.Thread(target=self._watch_stop, daemon=True,
+                         name="StopWatchdog").start()
+
+    def _watch_stop(self) -> None:
+        deadline = time.monotonic() + STOP_WATCHDOG_SEC
+        while time.monotonic() < deadline:
+            if self.state != "finalizing":
+                return
+            time.sleep(0.5)
+        if self.state != "finalizing":
+            return
+        logger.error(
+            f"收尾超过 {STOP_WATCHDOG_SEC}s 仍未完成，强制回到 idle"
+            "（逐字稿可能不完整，详见日志）")
+        self._stopping = False
+        try:
+            if self.store:
+                self.store.close()
+        except Exception:  # noqa: BLE001
+            pass
+        self._set_state("idle")
+        self.bus.finished.emit(str(self.paths.root) if self.paths else "")
 
     def _do_stop(self) -> None:
         """收尾：停线程 → join → 写文件 → 发 finished 信号（异常不影响置 idle）"""
@@ -278,11 +309,17 @@ class SessionManager(QObject):
             logger.exception("生成逐字稿失败")
         finally:
             # 无论成败必须回到 idle，否则 UI 卡在 finalizing 无法再次录制
+            root = str(self.paths.root) if self.paths else ""
+            # 释放本会话的工作对象：避免下一次录制前读到上一次的录音线程
+            # （例如 elapsed 把上一场的时长继续显示出来）
+            self._recorder = self._transcriber = self._detector = None
+            self._ring = None
+            self.store = None
             self._stopping = False
             self._set_state("idle")
-            self.bus.finished.emit(str(self.paths.root) if self.paths else "")
+            self.bus.finished.emit(root)
             self.bus.status.emit("录制完成")
-            logger.info(f"会话结束: {self.paths.root if self.paths else '-'}")
+            logger.info(f"会话结束: {root or '-'}")
 
     # ================= 只读属性（供 UI 轮询） =================
     @property

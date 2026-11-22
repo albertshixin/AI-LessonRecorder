@@ -139,12 +139,19 @@ class MainWindow(QMainWindow):
         act_open_out = QAction("打开输出目录", self)
         act_open_out.triggered.connect(
             lambda: open_in_explorer(str(self.ctx.config.output_root)))
+        act_open_cfg = QAction("打开配置文件（所在目录）", self)
+        act_open_cfg.triggered.connect(
+            lambda: open_in_explorer(str(self.ctx.config.path.parent)))
+        act_open_sessions = QAction("打开历史会话目录", self)
+        act_open_sessions.triggered.connect(
+            lambda: open_in_explorer(str(self.ctx.config.output_root)))
         act_sessions = QAction("历史会话...", self)
         act_sessions.triggered.connect(self._open_sessions)
         act_quit = QAction("退出", self)
         act_quit.triggered.connect(self.close)
         m_file.addAction(act_open_out)
-        m_file.addAction(act_sessions)
+        m_file.addAction(act_open_sessions)
+        m_file.addAction(act_open_cfg)
         m_file.addSeparator()
         m_file.addAction(act_quit)
 
@@ -200,6 +207,36 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(central)
         self.setStatusBar(QStatusBar())
+        self._build_status_paths()
+
+    def _build_status_paths(self) -> None:
+        """状态栏右侧常驻显示「输出目录 / 配置文件」，点击可在资源管理器中打开。
+
+        让用户随时确认配置生效在哪里、配置文件在哪（便于备份/排障），
+        不必打开【设置】也能看到。
+        """
+        self._status_paths = QLabel()
+        self._status_paths.setTextFormat(Qt.RichText)
+        self._status_paths.setTextInteractionFlags(Qt.LinksAccessibleByMouse)
+        self._status_paths.setStyleSheet("padding:0 8px;")
+        self._status_paths.linkActivated.connect(self._on_status_link)
+        self.statusBar().addPermanentWidget(self._status_paths)
+        self.refresh_status_paths()
+
+    def refresh_status_paths(self) -> None:
+        """配置变更后刷新状态栏（设置保存后调用）"""
+        out = self.ctx.config.output_root
+        cfg = self.ctx.config.path
+        self._status_paths.setText(
+            f'📁 <a href="out" style="color:#444;text-decoration:none;">输出：{out}</a>'
+            f'　'
+            f'⚙ <a href="cfg" style="color:#444;text-decoration:none;">配置：{cfg}</a>')
+
+    def _on_status_link(self, href: str) -> None:
+        if href == "out":
+            open_in_explorer(str(self.ctx.config.output_root))
+        elif href == "cfg":
+            open_in_explorer(str(self.ctx.config.path.parent))
 
     def _setup_hotkeys(self) -> None:
         """注册全局快捷键（录制时窗口常失焦，必须系统级热键）"""
@@ -246,7 +283,19 @@ class MainWindow(QMainWindow):
     def _on_start(self, name: str) -> None:
         self.subtitle.clear_all()
         self.thumbs.clear_all()
-        if self.manager.start(name, monitor=self.control.selected_monitor()):
+        # 采集来源：控制面板显式选择了屏幕/窗口则写入运行时配置（覆盖设置默认），
+        # 选"跟随设置"则沿用 vision.capture（primary/region）。
+        src = self.control.selected_source()
+        monitor = 1
+        if src:
+            kind, val = src
+            if kind == "monitor":
+                self.ctx.config.set("vision.capture", "primary")
+                monitor = int(val)
+            elif kind == "window":
+                self.ctx.config.set("vision.capture", "window")
+                self.ctx.config.set("vision.window_title", str(val))
+        if self.manager.start(name, monitor=monitor):
             self.timer.start(500)
             self.statusBar().showMessage(f"录制中：{name}")
 
@@ -293,7 +342,11 @@ class MainWindow(QMainWindow):
             "（准确率不满意时，可用【导出 → 离线重转写】提升）",
             QMessageBox.Yes | QMessageBox.No)
         if ret == QMessageBox.Yes:
+            # 导出完成后 on_done 会自动打开 docx 所在目录
             self._export_root(session_root)
+        else:
+            # 不导出也直接打开会话目录，避免"找不到文件"的尴尬
+            open_in_explorer(session_root)
 
     # ================= 异步任务框架 =================
     def _run_async(self, worker: _AsyncWorker, title: str,
@@ -384,13 +437,19 @@ class MainWindow(QMainWindow):
         self._export_root(str(self.manager.paths.root))
 
     def _export_root(self, root: str) -> None:
-        try:
+        """导出 Word（异步）：完成后在资源管理器中打开 docx 所在目录"""
+        def task(w: _AsyncWorker) -> str:
             p = SessionManager.export_word(root)
-            self.statusBar().showMessage(f"Word 已导出：{p}")
-            QMessageBox.information(self, "完成", f"已导出：\n{p}")
-        except Exception as e:  # noqa: BLE001
-            logger.exception("Word 导出失败")
-            QMessageBox.critical(self, "错误", f"导出失败：{e}")
+            return f"Word 已导出：\n{p}"
+
+        def after(msg: str) -> None:
+            # 末行是文档绝对路径（Word 文档/课程 .docx）
+            last = [ln for ln in msg.strip().splitlines() if ln.strip()][-1]
+            target = Path(last)
+            open_in_explorer(str(target if target.is_dir() else target.parent))
+
+        worker = _AsyncWorker(task)
+        self._run_async(worker, "导出 Word 逐字稿", on_done=after)
 
     def _generate_course_current(self) -> None:
         if not self.manager.paths:
@@ -404,8 +463,15 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "未配置 LLM",
                                 "请先在【设置 → AI 梳理 (LLM)】中填写 Base URL 与 API Key")
             return
+
+        def after(msg: str) -> None:
+            # 末行是 .docx 绝对路径
+            last = [ln for ln in msg.strip().splitlines() if ln.strip()][-1]
+            target = Path(last)
+            open_in_explorer(str(target if target.is_dir() else target.parent))
+
         worker = _AsyncWorker(lambda w: self._course_task(root, llm_cfg, w))
-        self._run_async(worker, "AI 教程文档生成")
+        self._run_async(worker, "AI 教程文档生成", on_done=after)
 
     def _course_task(self, root: str, llm_cfg: dict, w: _AsyncWorker) -> str:
         """后台纯计算：只发进度信号，不碰任何 UI"""
@@ -468,9 +534,11 @@ class MainWindow(QMainWindow):
                     f"逐字稿已更新：transcript.md")
 
         worker = _AsyncWorker(task)
+        # 完成后打开 session 目录：里面能看到新 transcript.md（events.jsonl 也已更新）
         self._run_async(
             worker, "离线重转写（提高准确率）", cancellable=True,
-            on_done=lambda _m: setattr(self, "_retranscriber", None))
+            on_done=lambda _m: (setattr(self, "_retranscriber", None),
+                                open_in_explorer(str(root_p))))
 
     # ================= 模型下载（统一入口） =================
     def _download_model_then(self, model: str, then: Callable[[], None]) -> None:
@@ -548,6 +616,7 @@ class MainWindow(QMainWindow):
         if dlg.exec():
             self._apply_theme()
             self.control.refresh_monitors()
+            self.refresh_status_paths()  # 输出目录/配置路径如有变化
             self.statusBar().showMessage("设置已保存")
 
     def _open_sessions(self) -> None:

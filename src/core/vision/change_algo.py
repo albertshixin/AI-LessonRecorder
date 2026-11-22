@@ -130,3 +130,42 @@ def diff_ratio(x: np.ndarray, y: np.ndarray) -> float:
     if x.shape != y.shape:
         y = resize_gray(y, x.shape[1], x.shape[0])
     return float(np.count_nonzero(np.abs(x - y) > 24)) / float(x.size)
+
+
+# ─────────────────────────────────────────────────────────────────────
+#  纯色帧（过渡黑屏 / 白屏 / 淡入淡出中间帧）判定
+# ─────────────────────────────────────────────────────────────────────
+# 为什么不用 std？实测（1920x1080 降采样到 256 宽后，见标定脚本）：
+#   | 场景                  | std   | 分位跨度(p0.5~p99.5) |
+#   |-----------------------|-------|----------------------|
+#   | 全黑 / 全白 / 50%灰   | 0.00  | 0.0                  |
+#   | 黑屏 + 顶部小亮条 UI  | 13.64 | 0.0                  |
+#   | 真实 PPT（整行文字）  | 11~50 | 189~215              |
+# 即"带一点 UI 的纯色屏"std(13.6) 反而**高于**真实 PPT(std 11)，
+# std 无法区分二者；而分位跨度对"有没有实际明暗内容"非常干净：
+# 纯色屏≈0，只要有 ≥0.5% 的画面面积存在明暗差异就会显著抬升。
+# 分位数（而非 min/max）可免疫个别坏点/时间戳水印造成的误判。
+
+def frame_contrast(gray: np.ndarray, low: float = 0.5,
+                   high: float = 99.5) -> float:
+    """画面明暗跨度：第 low 与第 high 百分位之差（0~255）
+
+    纯色屏 ≈ 0；正常课件页通常 > 100。
+    """
+    g = np.asarray(gray, dtype=np.float32)
+    if g.size == 0:
+        return 0.0
+    lo, hi = np.percentile(g, [low, high])
+    return float(hi - lo)
+
+
+def is_blank_frame(gray: np.ndarray, spread_th: float = 10.0) -> bool:
+    """是否为纯色/近纯色帧（切换过渡时的黑屏、白屏、纯灰屏）
+
+    判据：明暗跨度 < spread_th（默认 10）。
+    - 全黑 / 全白 / 中间灰：跨度 0 → 丢弃
+    - 淡入淡出中间帧：整屏同一灰阶 → 跨度≈0 → 丢弃
+    - 带极小 UI 的纯色屏（进度条等占画面 <0.5%）：跨度≈0 → 丢弃
+    - 真实课件页（哪怕只有一行字）：跨度 >100 → 保留
+    """
+    return frame_contrast(gray) < float(spread_th)

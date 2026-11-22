@@ -12,11 +12,17 @@ v1.2 补齐需求 FR-08 中"已列出但未实现"的配置项：
 """
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox,
-                               QDoubleSpinBox, QFormLayout, QGroupBox, QLabel,
-                               QLineEdit, QMessageBox, QSpinBox, QTabWidget,
+                               QDoubleSpinBox, QFileDialog, QFormLayout,
+                               QGroupBox, QHBoxLayout, QLabel, QLineEdit,
+                               QMessageBox, QPushButton, QSpinBox, QTabWidget,
                                QVBoxLayout, QWidget)
 
+from src.utils.fsutil import open_in_explorer
 from src.utils.secrets_store import encryption_supported
 
 # LLM 服务商预设：key → (显示名, Base URL, 默认模型, 常用模型列表)
@@ -176,8 +182,11 @@ class SettingsDialog(QDialog):
         basic = _section("抓屏")
         f1 = basic.layout()
         self.v_capture = QComboBox()
-        self.v_capture.addItems(["primary", "region"])
-        self.v_capture.setCurrentText(self.config.get("vision.capture", "primary"))
+        # window 模式由主界面"采集来源"下拉选择应用窗口，此处仅作显示与回退
+        self.v_capture.addItems(["primary", "region", "window"])
+        cap = self.config.get("vision.capture", "primary")
+        self.v_capture.setCurrentText(cap if cap in ("primary", "region", "window")
+                                      else "primary")
         self.v_capture.currentTextChanged.connect(
             lambda t: self.v_x.setEnabled(t == "region"))
         f1.addRow("抓屏范围：", self.v_capture)
@@ -246,6 +255,14 @@ class SettingsDialog(QDialog):
         self.v_ssim.setDecimals(2)
         self.v_ssim.setValue(float(self.config.get("vision.ssim_threshold", 0.95)))
         f3.addRow("③ SSIM 下限（挡亮度噪声）：", self.v_ssim)
+
+        self.v_blank = QDoubleSpinBox()
+        self.v_blank.setRange(0.0, 60.0)
+        self.v_blank.setSingleStep(1.0)
+        self.v_blank.setDecimals(1)
+        self.v_blank.setValue(
+            float(self.config.get("vision.blank_spread_threshold", 10.0)))
+        f3.addRow("④ 纯色帧跨度下限（丢弃切换黑屏/白屏）：", self.v_blank)
 
         self.v_backtrack = QDoubleSpinBox()
         self.v_backtrack.setRange(0.01, 0.3)
@@ -339,9 +356,48 @@ class SettingsDialog(QDialog):
     def _build_output_tab(self) -> QWidget:
         w = QWidget()
         form = QFormLayout(w)
-        self.out_dir = QLineEdit(str(self.config.get("output.dir", "output")))
-        form.addRow("输出目录：", self.out_dir)
 
+        # 1) 输出目录：行编辑 + 浏览 + 实际路径预览 + 立即打开
+        self.out_dir = QLineEdit(str(self.config.get("output.dir", "output")))
+        self.out_dir.setPlaceholderText("绝对路径，或相对应用根目录的相对路径")
+        btn_browse = QPushButton("浏览…")
+        btn_browse.clicked.connect(self._browse_output_dir)
+        btn_open_now = QPushButton("打开")
+        btn_open_now.setToolTip("在资源管理器中打开当前输出目录")
+        btn_open_now.clicked.connect(self._open_current_output_dir)
+        edit_row = QHBoxLayout()
+        edit_row.addWidget(self.out_dir, 1)
+        edit_row.addWidget(btn_browse)
+        edit_row.addWidget(btn_open_now)
+        edit_row_w = QWidget(); edit_row_w.setLayout(edit_row)
+
+        self.out_dir_preview = QLabel("")
+        self.out_dir_preview.setStyleSheet("color:#666; font-size:11px;")
+        self.out_dir_preview.setWordWrap(True)
+        self.out_dir.textChanged.connect(self._refresh_output_preview)
+
+        out_col = QWidget()
+        out_col_v = QVBoxLayout(out_col)
+        out_col_v.setContentsMargins(0, 0, 0, 0)
+        out_col_v.setSpacing(4)
+        out_col_v.addWidget(edit_row_w)
+        out_col_v.addWidget(self.out_dir_preview)
+        form.addRow("输出目录：", out_col)
+
+        # 2) 配置文件位置（提示用户本地配置存在、便于排障/备份）
+        self.cfg_path_lbl = QLabel(str(self.config.path))
+        self.cfg_path_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.cfg_path_lbl.setStyleSheet("color:#666; font-size:11px;")
+        btn_reveal_cfg = QPushButton("在资源管理器中显示")
+        btn_reveal_cfg.clicked.connect(
+            lambda: open_in_explorer(str(self.config.path.parent)))
+        cfg_row = QHBoxLayout()
+        cfg_row.addWidget(self.cfg_path_lbl, 1)
+        cfg_row.addWidget(btn_reveal_cfg)
+        cfg_row_w = QWidget(); cfg_row_w.setLayout(cfg_row)
+        form.addRow("配置文件位置：", cfg_row_w)
+
+        # 3) 保留音频 / 主题（保留原逻辑）
         self.keep_audio = QCheckBox("保留 audio.wav 原始音频（关闭可省磁盘，"
                                      "但将无法离线重转写）")
         self.keep_audio.setChecked(bool(self.config.get("output.keep_audio", True)))
@@ -351,7 +407,52 @@ class SettingsDialog(QDialog):
         self.theme.addItems(["light", "dark"])
         self.theme.setCurrentText(self.config.get("ui.theme", "light"))
         form.addRow("界面主题：", self.theme)
+
+        # 初始预览
+        self._refresh_output_preview()
         return w
+
+    def _resolve_output_dir(self) -> Path:
+        """把当前 out_dir 输入解析为绝对路径（基于应用根）"""
+        text = self.out_dir.text().strip() or "output"
+        p = Path(text)
+        if p.is_absolute():
+            return p
+        return (self.config.path.parent.parent / p).resolve()
+
+    def _refresh_output_preview(self) -> None:
+        text = self.out_dir.text().strip()
+        if not text:
+            self.out_dir_preview.setText("⚠ 路径不能为空")
+            self.out_dir_preview.setStyleSheet("color:#c00; font-size:11px;")
+            return
+        try:
+            resolved = self._resolve_output_dir()
+        except (OSError, ValueError) as e:
+            self.out_dir_preview.setText(f"⚠ 路径无效：{e}")
+            self.out_dir_preview.setStyleSheet("color:#c00; font-size:11px;")
+            return
+        exists = "✓ 已存在" if resolved.exists() else "（首次录制时会自动创建）"
+        writable = "可写" if (resolved.exists() and os.access(resolved, os.W_OK)) \
+            or (not resolved.exists() and os.access(resolved.parent, os.W_OK)) else "⚠ 父目录不可写"
+        self.out_dir_preview.setText(
+            f"实际写入：{resolved}　{exists}　·　{writable}")
+        self.out_dir_preview.setStyleSheet("color:#666; font-size:11px;")
+
+    def _browse_output_dir(self) -> None:
+        cur = self._resolve_output_dir() if self.out_dir.text().strip() else \
+            self.config.output_root
+        chosen = QFileDialog.getExistingDirectory(self, "选择输出目录", str(cur))
+        if chosen:
+            # 用绝对路径回填，行为最直观（避免用户选了一个盘符却填了相对路径）
+            self.out_dir.setText(chosen)
+
+    def _open_current_output_dir(self) -> None:
+        text = self.out_dir.text().strip()
+        if not text:
+            QMessageBox.information(self, "提示", "请先填写输出目录")
+            return
+        open_in_explorer(str(self._resolve_output_dir()))
 
     # ---------- 保存 ----------
     def _save(self) -> None:
@@ -382,6 +483,7 @@ class SettingsDialog(QDialog):
         cfg.set("vision.min_diff_ratio", self.v_min_diff.value())
         cfg.set("vision.ssim_threshold", self.v_ssim.value())
         cfg.set("vision.backtrack_tol", self.v_backtrack.value())
+        cfg.set("vision.blank_spread_threshold", self.v_blank.value())
         cfg.set("vision.cooldown_sec", self.v_cooldown.value())
 
         cfg.set("llm.provider", self.llm_provider.currentData() or "custom")
@@ -391,14 +493,40 @@ class SettingsDialog(QDialog):
         cfg.set("llm.temperature", self.llm_temp.value())
         cfg.set("llm.max_chunk_chars", self.llm_chunk.value())
 
-        cfg.set("output.dir", self.out_dir.text().strip())
-        cfg.set("output.keep_audio", self.keep_audio.isChecked())
-        cfg.set("ui.theme", self.theme.currentText())
-
-        if not self.out_dir.text().strip():
+        out_text = self.out_dir.text().strip()
+        if not out_text:
             QMessageBox.warning(self, "提示", "输出目录不能为空")
             return
+        # 绝对路径：先尝试创建（首次使用）；父目录不可写就提示
+        out_path = Path(out_text)
+        if out_path.is_absolute():
+            try:
+                out_path.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                QMessageBox.warning(self, "提示",
+                                    f"无法创建输出目录 {out_path}：{e}\n"
+                                    "请检查路径与权限")
+                return
+        else:
+            # 相对路径：解析后若父目录不可写就提示
+            base = self.config.path.parent.parent
+            resolved = (base / out_path).resolve()
+            parent = resolved.parent
+            if not parent.exists() or not os.access(parent, os.W_OK):
+                QMessageBox.warning(self, "提示",
+                                    f"输出目录的父目录不可写：{parent}")
+                return
+
+        cfg.set("output.dir", out_text)
+        cfg.set("output.keep_audio", self.keep_audio.isChecked())
+        cfg.set("ui.theme", self.theme.currentText())
         cfg.save()
+        # 模型档位/设备可能已变更 → 丢弃缓存的 ASR 引擎，下次按需重建
+        try:
+            from src.ai.asr.asr_engine import clear_engine_cache
+            clear_engine_cache()
+        except Exception:  # noqa: BLE001
+            pass
         self.accept()
 
 

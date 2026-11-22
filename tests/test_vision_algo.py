@@ -13,7 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
 
-from src.core.vision.change_algo import (dhash, diff_ratio, hamming, phash,
+from src.core.vision.change_algo import (dhash, diff_ratio, frame_contrast,
+                                         hamming, is_blank_frame, phash,
                                          resize_gray, ssim)
 
 FAILURES: list[str] = []
@@ -159,6 +160,69 @@ def test_edge_cases() -> None:
     check(r.shape == (32, 32), "resize_gray 输出形状正确")
 
 
+# ─────────────────────────────────────────────────────────────────────
+# 纯色过渡帧（切换黑屏/白屏）判定
+# ─────────────────────────────────────────────────────────────────────
+def _solid(value: float, shape=(400, 600), bar=None) -> np.ndarray:
+    """纯色画面；bar=(值, y0, y1, x0, x1) 可叠加一条小 UI（模拟播放器进度条）"""
+    img = np.full(shape, value, dtype=np.float64)
+    if bar:
+        v, y0, y1, x0, x1 = bar
+        img[y0:y1, x0:x1] = v
+    return img
+
+
+def test_blank_frame_detection() -> None:
+    """纯色过渡帧必须判为丢弃；真实课件页必须判为保留"""
+    print("\n[5] 纯色过渡帧判定（切换黑屏 / 白屏）")
+
+    black = _solid(0.0)
+    white = _solid(255.0)
+    gray = _solid(128.0)
+    dark_gray = _solid(40.0)
+    noisy_black = np.clip(_solid(3.0) + np.random.default_rng(1).normal(
+        0, 2, (400, 600)), 0, 255)          # 黑屏 + 压缩噪声
+    # 覆盖画面 0.33% 的细亮条（播放器进度条量级）→ 仍应判为纯色屏
+    black_ui = _solid(0.0, bar=(220.0, 0, 4, 200, 300))
+
+    for name, frame in (("全黑屏", black), ("全白屏", white),
+                        ("50%灰屏（淡入淡出中间帧）", gray),
+                        ("深灰过渡帧", dark_gray),
+                        ("黑屏+压缩噪声", noisy_black),
+                        ("黑屏+细进度条UI(0.33%)", black_ui)):
+        c = frame_contrast(frame)
+        check(is_blank_frame(frame),
+              f"{name} 判为纯色帧并丢弃（跨度={c:.1f}）")
+
+    # 已知边界（有意为之，非缺陷）：叠加物一旦占到画面 0.5% 以上，
+    # 就被当作"内容"保留。宁可多存一张，也不能误丢真实页面。
+    big_ui = _solid(0.0, bar=(220.0, 0, 20, 200, 400))    # 约 0.67%
+    check(not is_blank_frame(big_ui),
+          f"叠加物占画面 >0.5% 时视为内容保留（跨度={frame_contrast(big_ui):.1f}）")
+
+    # 真实课件页：哪怕只有一行字，也必须保留
+    one_line = np.full((400, 600), 245.0)
+    one_line[100:126, 40:540] = 25.0        # 单行文字
+    for name, frame in (("满页文字课件", make_slide(DENSE)),
+                        ("稀疏文字课件", make_slide(SPARSE)),
+                        ("单行文字课件", one_line)):
+        c = frame_contrast(frame)
+        check(not is_blank_frame(frame),
+              f"{name} 判为有效页面并保留（跨度={c:.1f}）")
+
+    # 分离度：纯色帧与真实页面之间必须有数量级差距（阈值才有腾挪空间）
+    check(frame_contrast(one_line) > 100,
+          f"单行文字页跨度显著（{frame_contrast(one_line):.1f} > 100）")
+    check(frame_contrast(black) < 1 and frame_contrast(white) < 1,
+          "纯黑/纯白跨度≈0")
+    # 阈值可调：调到 0 意味着只丢弃绝对纯色；调到很大会把真实页也丢弃（供极端场景）
+    check(is_blank_frame(one_line, spread_th=1000.0),
+          "阈值调大时真实页也会被判为纯色（说明阈值确实生效且可调）")
+
+    # 边界：空帧不崩溃
+    check(is_blank_frame(np.zeros((0, 0))), "空帧安全判为纯色（不崩溃）")
+
+
 if __name__ == "__main__":
     print("=" * 62)
     print("翻页判据标定测试（v1.2 三层判据）")
@@ -166,6 +230,7 @@ if __name__ == "__main__":
     test_three_layer_separation()
     test_simulate_detector_decisions()
     test_edge_cases()
+    test_blank_frame_detection()
     print("\n" + "=" * 62)
     if FAILURES:
         print(f"失败{len(FAILURES)} 项：")

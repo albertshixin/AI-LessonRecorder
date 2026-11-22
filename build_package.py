@@ -31,7 +31,7 @@ PY = sys.executable
 APP_NAME = "在线课程录播器"
 DIST = ROOT / "dist" / APP_NAME
 RELEASE = ROOT / "release"
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 BUILDER = ROOT / "build.spec"
 
 README = f"""在线课程录播器（AI LessonRecorder）v{VERSION}
