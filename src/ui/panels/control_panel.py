@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""录制控制面板：课程名输入 + 屏幕/按钮/计时 + 音量条"""
+"""录制控制面板：课程名输入 + 屏幕/按钮/计时 + 自动截图开关 + 音量条"""
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QLineEdit,
-                               QProgressBar, QPushButton, QSizePolicy,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QLabel,
+                               QLineEdit, QProgressBar, QPushButton,
+                               QSizePolicy, QVBoxLayout, QWidget)
 
 from src.core.vision.screen_capturer import ScreenCapturer
 from src.utils.timeutil import fmt_ts
@@ -15,6 +15,7 @@ class ControlPanel(QWidget):
     resume_requested = Signal()
     stop_requested = Signal()
     screenshot_requested = Signal()
+    auto_capture_toggled = Signal(bool)   # 自动截图开关（主界面随时切换）
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -50,6 +51,14 @@ class ControlPanel(QWidget):
         self.btn_pause = QPushButton("⏸ 暂停")
         self.btn_stop = QPushButton("■ 停止")
         self.btn_shot = QPushButton("📷 手动截图")
+        # 自动截图开关：放主界面（不进设置），录制中也能随时切换；
+        # 初始勾选态由 MainWindow 按配置回填（set_auto_capture_checked）
+        self.chk_auto = QCheckBox("自动截图")
+        self.chk_auto.setToolTip(
+            "勾选：页面变化率超过阈值（设置里可调，默认 10%）时自动截图\n"
+            "不勾选：全靠手动截图（F9 / 按钮）\n"
+            "两种模式互不影响：自动开启时手动截图依然可用，随时切换即时生效")
+        self.chk_auto.toggled.connect(self.auto_capture_toggled.emit)
         self.timer_label = QLabel("00:00:00")
         self.timer_label.setObjectName("timerLabel")
         self.timer_label.setAlignment(Qt.AlignCenter)
@@ -59,6 +68,7 @@ class ControlPanel(QWidget):
         row2.addWidget(self.btn_pause)
         row2.addWidget(self.btn_stop)
         row2.addWidget(self.btn_shot)
+        row2.addWidget(self.chk_auto)
         row2.addStretch(1)
         row2.addWidget(QLabel("录制时长："))
         row2.addWidget(self.timer_label)
@@ -114,6 +124,12 @@ class ControlPanel(QWidget):
         """电平 0~1 → 0~100"""
         v = max(0, min(100, int(level * 100)))
         self.level_bar.setValue(v)
+
+    def set_auto_capture_checked(self, on: bool) -> None:
+        """按配置回填勾选态（不发 toggled 信号）"""
+        self.chk_auto.blockSignals(True)
+        self.chk_auto.setChecked(bool(on))
+        self.chk_auto.blockSignals(False)
 
     def refresh_monitors(self) -> None:
         """兼容旧调用：刷新采集来源列表"""

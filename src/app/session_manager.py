@@ -138,6 +138,8 @@ class SessionManager(QObject):
                 min_diff_ratio=float(v.get("min_diff_ratio", 0.02)),
                 ssim_threshold=float(v.get("ssim_threshold", 0.95)),
                 blank_spread_threshold=float(v.get("blank_spread_threshold", 10.0)),
+                auto_capture=bool(v.get("auto_capture", False)),
+                auto_capture_diff=float(v.get("auto_capture_diff", 0.10)),
                 capture=v.get("capture", "primary"),
                 region=region,
                 monitor=int(monitor),
@@ -366,6 +368,11 @@ class SessionManager(QObject):
             self._detector.request_capture()
             return True
         return False
+
+    def set_auto_capture(self, on: bool) -> None:
+        """运行中即时切换自动截图（线程安全：检测线程每轮 tick 都会读取该 bool）"""
+        if self._detector is not None:
+            self._detector.auto_capture = bool(on)
 
     # ---------- 历史会话操作（静态，供 UI 直接调用）----------
     @staticmethod

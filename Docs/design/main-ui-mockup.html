@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>主界面风格样图 · 赛博蓝</title>
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { width:1440px; height:900px; overflow:hidden; background:#050914;
+         font:14px "Microsoft YaHei","PingFang SC",sans-serif; color:#dbe7ff; }
+  .app { position:relative; height:100%; padding:10px;
+         background:
+           radial-gradient(900px 480px at 18% -8%, rgba(0,180,255,.20), transparent 62%),
+           radial-gradient(760px 420px at 92% 6%, rgba(124,92,255,.16), transparent 60%),
+           linear-gradient(160deg,#070c1b 0%,#050914 55%,#080d1e 100%); }
+  .app::before { content:""; position:absolute; inset:0; opacity:.5;
+    background-image:linear-gradient(rgba(90,150,255,.045) 1px,transparent 1px),
+                     linear-gradient(90deg,rgba(90,150,255,.045) 1px,transparent 1px);
+    background-size:44px 44px; }
+  .win { position:relative; height:100%; border-radius:14px; overflow:hidden;
+         border:1px solid rgba(90,190,255,.28);
+         box-shadow:0 0 0 1px rgba(0,0,0,.5),0 24px 70px rgba(0,0,0,.6),
+                    inset 0 1px 0 rgba(150,220,255,.10);
+         display:flex; flex-direction:column; }
+  .win::after { content:""; position:absolute; top:0; left:0; right:0; height:2px;
+    background:linear-gradient(90deg,transparent,#00d9ff 22%,#7c5cff 62%,transparent);
+    opacity:.85; }
+
+  /* ── 标题栏 ── */
+  .title { height:44px; display:flex; align-items:center; gap:10px; padding:0 16px;
+           background:linear-gradient(90deg,rgba(20,32,62,.92),rgba(13,22,46,.88));
+           border-bottom:1px solid rgba(90,190,255,.13); }
+  .logo { width:26px; height:26px; border-radius:8px; display:grid; place-items:center;
+          background:linear-gradient(135deg,#00d9ff,#6a5cff); color:#04101f;
+          font-weight:900; font-size:13px; box-shadow:0 0 16px rgba(0,217,255,.55); }
+  .title b { font-size:14px; letter-spacing:.5px; }
+  .badge { font:10px/1 Consolas,monospace; padding:4px 7px; border-radius:20px;
+           color:#67e8ff; border:1px solid rgba(0,217,255,.45);
+           background:rgba(0,217,255,.08); letter-spacing:1px; }
+  .title .sp { flex:1; }
+  .wbtn { width:26px; height:26px; border-radius:7px; display:grid; place-items:center;
+          color:#8fa6cc; font-size:12px; }
+  .wbtn.close:hover { background:rgba(255,80,100,.18); color:#ff8a9a; }
+
+  /* ── 菜单栏 ── */
+  .menu { height:34px; display:flex; align-items:center; gap:26px; padding:0 20px;
+          font-size:13px; color:#93a9cc; border-bottom:1px solid rgba(90,190,255,.10);
+          background:rgba(9,15,32,.60); }
+  .menu span:hover { color:#67e8ff; }
+
+  .body { flex:1; padding:14px 18px 10px; display:flex; flex-direction:column; gap:12px; min-height:0; }
+  .panel { background:linear-gradient(160deg,rgba(19,30,58,.72),rgba(11,18,38,.66));
+           border:1px solid rgba(96,168,255,.16); border-radius:12px;
+           box-shadow:inset 0 1px 0 rgba(160,220,255,.06),0 8px 24px rgba(0,0,0,.22);
+           backdrop-filter:blur(8px); }
+
+  /* ── 第一行 ── */
+  .row1 { display:flex; align-items:center; gap:12px; padding:12px 16px; }
+  .lab { color:#8ba4cc; font-size:13px; white-space:nowrap; }
+  .field { height:34px; display:flex; align-items:center; gap:8px; padding:0 12px;
+           border-radius:8px; color:#c9daff; font-size:13px;
+           background:rgba(8,14,30,.66); border:1px solid rgba(96,168,255,.22); }
+  .field.focus { flex:1; border-color:rgba(0,217,255,.65);
+                 box-shadow:0 0 0 3px rgba(0,217,255,.10),0 0 18px rgba(0,217,255,.18); }
+  .field.focus .ph { color:#5f779b; }
+  .field .caret { width:1px; height:15px; background:#67e8ff; box-shadow:0 0 8px #00d9ff; }
+  .combo { width:300px; justify-content:space-between; }
+  .combo .chev { color:#67e8ff; }
+  .refresh { width:34px; height:34px; display:grid; place-items:center; border-radius:8px;
+             color:#67e8ff; border:1px solid rgba(0,217,255,.35); background:rgba(0,217,255,.07); }
+
+  /* ── 控制行 ── */
+  .row2 { display:flex; align-items:center; gap:10px; padding:10px 16px; }
+  .btn { height:34px; padding:0 16px; border-radius:8px; display:flex; align-items:center;
+         gap:7px; font-size:13px; font-weight:600; white-space:nowrap; }
+  .btn.primary { color:#fff; border:1px solid rgba(255,120,140,.6);
+    background:linear-gradient(120deg,#ff4d6d,#ff7a45);
+    box-shadow:0 0 22px rgba(255,77,109,.45),inset 0 1px 0 rgba(255,255,255,.25); }
+  .btn.ghost { color:#a9c2e8; border:1px solid rgba(110,165,255,.28);
+               background:rgba(20,34,64,.55); }
+  .btn.ghost:hover { border-color:#00d9ff; color:#e6f7ff; box-shadow:0 0 14px rgba(0,217,255,.22); }
+  .btn.dim { color:#6c7f9f; border:1px solid rgba(110,165,255,.14); background:rgba(14,22,42,.45); }
+  .switch { display:flex; align-items:center; gap:9px; margin-left:6px; color:#a9c2e8; font-size:13px; }
+  .sw { width:38px; height:20px; border-radius:20px; position:relative;
+        background:rgba(40,55,85,.8); border:1px solid rgba(110,165,255,.30); }
+  .sw i { position:absolute; top:2px; left:2px; width:14px; height:14px; border-radius:50%;
+          background:#7890b5; }
+  .sw.on { background:linear-gradient(90deg,#0a6cff,#00d9ff); border-color:#00d9ff;
+           box-shadow:0 0 16px rgba(0,217,255,.45); }
+  .sw.on i { left:20px; background:#fff; box-shadow:0 0 8px #fff; }
+  .spacer { flex:1; }
+  .timer { font:600 20px Consolas,"Courier New",monospace; letter-spacing:2px;
+           color:#67e8ff; text-shadow:0 0 16px rgba(0,217,255,.75); }
+
+  /* ── 波形 ── */
+  .wave { height:46px; display:flex; align-items:center; gap:12px; padding:0 16px; }
+  .bars { flex:1; height:22px; display:flex; align-items:center; gap:3px; overflow:hidden; }
+  .bars i { flex:1; border-radius:2px; background:linear-gradient(180deg,#00d9ff,#6a5cff);
+            opacity:.85; box-shadow:0 0 7px rgba(0,217,255,.4); }
+  .wave .lvl { font:11px Consolas,monospace; color:#67e8ff; }
+
+  /* ── 主区 ── */
+  .main { flex:1; display:flex; flex-direction:column; gap:12px; min-height:0; }
+  .head { height:38px; display:flex; align-items:center; gap:10px; padding:0 16px;
+          border-bottom:1px solid rgba(96,168,255,.12); }
+  .head .dot { width:7px; height:7px; border-radius:50%; background:#00d9ff;
+               box-shadow:0 0 12px #00d9ff; }
+  .head b { font-size:13px; letter-spacing:.5px; }
+  .head .en { font:10px Consolas,monospace; color:#5f7ba5; letter-spacing:1.5px; }
+  .head .chip { margin-left:auto; font:10px Consolas,monospace; color:#67e8ff;
+                border:1px solid rgba(0,217,255,.35); border-radius:20px; padding:4px 9px;
+                background:rgba(0,217,255,.07); }
+
+  .transcript { flex:1; padding:16px 18px; display:flex; flex-direction:column; gap:14px; min-height:0; }
+  .line { display:flex; gap:14px; align-items:flex-start; }
+  .ts { font:12px Consolas,monospace; color:#5f7ba5; padding-top:2px; width:66px; }
+  .text { flex:1; padding:10px 14px; border-radius:8px; font-size:14px; line-height:1.7;
+          color:#c9daff; background:rgba(10,18,38,.55);
+          border-left:2px solid rgba(0,217,255,.55); }
+  .line.hot .text { color:#eaf7ff; border-left-color:#00d9ff;
+                    background:linear-gradient(90deg,rgba(0,217,255,.12),rgba(10,18,38,.5) 60%);
+                    box-shadow:0 0 20px rgba(0,217,255,.10); }
+  .line.hot .ts { color:#67e8ff; }
+  .ai { font:10px Consolas,monospace; color:#a58bff; border:1px solid rgba(124,92,255,.4);
+        border-radius:4px; padding:1px 5px; margin-right:8px; }
+  .caret2 { display:inline-block; width:2px; height:14px; background:#00d9ff;
+            box-shadow:0 0 8px #00d9ff; vertical-align:-2px; animation:blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+
+  .film { height:190px; display:flex; flex-direction:column; }
+  .strip { flex:1; display:flex; gap:14px; padding:14px 16px; overflow:hidden; }
+  .card { width:190px; border-radius:9px; position:relative; overflow:hidden;
+          border:1px solid rgba(96,168,255,.20); background:#0b1430; }
+  .card.sel { border-color:#00d9ff; box-shadow:0 0 22px rgba(0,217,255,.35),
+              inset 0 0 0 1px rgba(0,217,255,.35); }
+  .slide { height:100%; padding:14px; display:flex; flex-direction:column; gap:9px;
+           background:linear-gradient(150deg,rgba(24,44,90,.9),rgba(10,18,42,.9)); }
+  .slide .t { height:9px; width:60%; border-radius:3px;
+              background:linear-gradient(90deg,#00d9ff,#6a5cff); }
+  .slide .a { height:6px; width:85%; border-radius:3px; background:rgba(160,190,240,.22); }
+  .slide .a.s { width:60%; }
+  .slide .box { margin-top:auto; height:52px; border-radius:6px;
+                background:linear-gradient(120deg,rgba(0,217,255,.16),rgba(124,92,255,.18));
+                border:1px solid rgba(0,217,255,.25); }
+  .card .cap { position:absolute; left:0; right:0; bottom:0; height:24px; display:flex;
+               align-items:center; justify-content:space-between; padding:0 9px;
+               font:10px Consolas,monospace; color:#9fb8dd;
+               background:linear-gradient(transparent,rgba(4,9,22,.92)); }
+  .card.sel .cap { color:#67e8ff; }
+
+  /* ── 状态栏 ── */
+  .status { height:32px; display:flex; align-items:center; gap:8px; padding:0 18px;
+            border-top:1px solid rgba(96,168,255,.12); background:rgba(7,12,28,.8);
+            font-size:11px; color:#6f86ab; }
+  .key { font:10px Consolas,monospace; color:#8fb4e6; padding:3px 7px; border-radius:5px;
+         border:1px solid rgba(110,165,255,.25); background:rgba(20,34,64,.6); }
+  .status .sp { flex:1; }
+  .status a { color:#67e8ff; text-decoration:none; }
+  .pulse { width:7px; height:7px; border-radius:50%; background:#00d9ff;
+           box-shadow:0 0 10px #00d9ff; }
+</style>
+</head>
+<body>
+<div class="app"><div class="win">
+
+  <div class="title">
+    <div class="logo">AI</div>
+    <b>在线课程录播器</b><span class="badge">AI LESSONRECORDER</span>
+    <span class="sp"></span>
+    <div class="wbtn">—</div><div class="wbtn">□</div><div class="wbtn close">✕</div>
+  </div>
+
+  <div class="menu"><span>文件(F)</span><span>导出(E)</span><span>设置(S)</span><span>帮助(H)</span></div>
+
+  <div class="body">
+
+    <div class="panel row1">
+      <span class="lab">课程名称</span>
+      <div class="field focus"><span class="ph">机器学习入门 第3讲</span><span class="caret"></span></div>
+      <span class="lab">采集来源</span>
+      <div class="field combo"><span>跟随设置（显示器/区域）</span><span class="chev">⌄</span></div>
+      <div class="refresh">↻</div>
+    </div>
+
+    <div class="panel row2">
+      <div class="btn primary">● 开始录制</div>
+      <div class="btn ghost">⏸ 暂停</div>
+      <div class="btn ghost">■ 停止</div>
+      <div class="btn ghost">📷 手动截图</div>
+      <div class="switch"><div class="sw"><i></i></div><span>自动截图</span></div>
+      <span class="spacer"></span>
+      <span class="lab">录制时长</span><span class="timer">00:12:36</span>
+    </div>
+
+    <div class="panel wave">
+      <span class="lab">声音电平</span>
+      <div class="bars" id="bars"></div>
+      <span class="lvl">-12 dB</span>
+    </div>
+
+    <div class="main">
+      <div class="panel" style="flex:1;display:flex;flex-direction:column;min-height:0">
+        <div class="head"><span class="dot"></span><b>实时字幕</b>
+          <span class="en">LIVE TRANSCRIPT</span><span class="chip">AI ENGINE · ONLINE</span></div>
+        <div class="transcript">
+          <div class="line"><span class="ts">00:12:04</span><div class="text"><span class="ai">AI</span>我们今天来讲一下神经网络中最基础的概念，也就是感知机模型。</div></div>
+          <div class="line"><span class="ts">00:12:18</span><div class="text"><span class="ai">AI</span>它由输入层、权重和激活函数组成，可以理解为对特征做一次加权求和。</div></div>
+          <div class="line hot"><span class="ts">00:12:31</span><div class="text"><span class="ai">AI</span>接下来我们通过一个例子来看它如何进行二分类<span class="caret2"></span></div></div>
+        </div>
+      </div>
+
+      <div class="panel film">
+        <div class="head"><span class="dot"></span><b>PPT 截图</b>
+          <span class="en">SLIDE CAPTURE</span><span class="chip">3 SHOTS</span></div>
+        <div class="strip">
+          <div class="card"><div class="slide"><div class="t"></div><div class="a"></div><div class="a s"></div><div class="box"></div></div><div class="cap"><span>00:03:12</span><span>#01</span></div></div>
+          <div class="card"><div class="slide"><div class="t"></div><div class="a"></div><div class="a"></div><div class="a s"></div></div><div class="cap"><span>00:07:45</span><span>#02</span></div></div>
+          <div class="card sel"><div class="slide"><div class="t"></div><div class="a"></div><div class="a s"></div><div class="box"></div></div><div class="cap"><span>00:12:30</span><span>#03</span></div></div>
+          <div class="card"><div class="slide"><div class="t"></div><div class="a"></div><div class="a"></div><div class="box"></div></div><div class="cap"><span>等待中</span><span>—</span></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="status">
+      <span class="pulse"></span><span>系统就绪</span>
+      <span class="key">F9 手动截图</span><span class="key">F10 暂停/继续</span>
+      <span class="key">F11 停止录制</span><span class="key">Ctrl+Shift+F9 唤起窗口</span>
+      <span class="sp"></span><a>📁 输出目录</a><a>⚙ 配置文件</a>
+    </div>
+
+  </div>
+</div></div>
+<script>
+  const b = document.getElementById('bars');
+  const hs = [6,10,15,9,18,12,8,14,20,11,7,16,22,13,9,17,11,6,14,19,10,8,15,21,12,7,13,18,9,6,11,16,20,10,7,14,9,17,12,6,15,19,11,8,13,18,10,7];
+  hs.forEach(h => { const i=document.createElement('i'); i.style.height=h+'px'; b.appendChild(i); });
+</script>
+</body>
+</html>

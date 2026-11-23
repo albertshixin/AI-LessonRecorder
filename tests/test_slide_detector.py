@@ -95,8 +95,11 @@ def make_bgra(widths: list[int], seed: int = 0, noise: float = 0.0,
 
 
 def build_detector(frames, shots_dir, **kw):
+    # auto_capture_diff=0.02：本套件标定用帧组变化率 ≈5%（旧三层判据可触发），
+    # 固定在 2% 档位以保留原有标定语义（10% 默认档的语义见 test_auto_capture.py）
     det = SlideDetector(shots_dir=shots_dir, on_slide=lambda ev: None,
-                        interval_sec=0.05, cooldown_sec=0.0, **kw)
+                        interval_sec=0.05, cooldown_sec=0.0,
+                        auto_capture_diff=0.02, **kw)
     det.capturer = FakeCapturer(frames)
     return det
 
@@ -204,7 +207,8 @@ def test_slide_events(tmp: Path) -> None:
     events = []
     frames = ([make_bgra([200, 150])] * 4 + [make_bgra([80, 60], seed=2)] * 4)
     det = SlideDetector(shots_dir=tmp / "t5", on_slide=events.append,
-                        interval_sec=0.05, cooldown_sec=0.0)
+                        interval_sec=0.05, cooldown_sec=0.0,
+                        auto_capture_diff=0.02)
     det.capturer = FakeCapturer(frames)
     det.start()
     ok = wait_until(lambda: len(events) >= 2, timeout=8)
@@ -228,7 +232,7 @@ def test_backtrack_not_recorded(tmp: Path) -> None:
     frames = [A] * 4 + [B] * 4 + [A] * 10
     det = SlideDetector(shots_dir=tmp / "t6", on_slide=events.append,
                         interval_sec=0.05, cooldown_sec=0.0,
-                        record_backtrack=False)
+                        auto_capture_diff=0.02, record_backtrack=False)
     det.capturer = FakeCapturer(frames)
     det.start()
     ok = wait_until(lambda: det.stats_counter.get("backtracks", 0) >= 1, timeout=8)
@@ -247,7 +251,7 @@ def test_backtrack_not_recorded(tmp: Path) -> None:
     events2 = []
     det2 = SlideDetector(shots_dir=tmp / "t6b", on_slide=events2.append,
                          interval_sec=0.05, cooldown_sec=0.0,
-                         record_backtrack=True)
+                         auto_capture_diff=0.02, record_backtrack=True)
     det2.capturer = FakeCapturer([A] * 4 + [B] * 4 + [A] * 10)
     det2.start()
     wait_until(lambda: det2.stats_counter.get("backtracks", 0) >= 1, timeout=8)
@@ -277,7 +281,8 @@ def test_blank_transition_not_saved(tmp: Path) -> None:
     # A 稳定 → 切到黑屏（过渡）→ 真正翻到 B；黑屏期间不得产生任何截图
     frames = ([A] * 4 + [BLACK] * 6 + [B] * 6)
     det = SlideDetector(shots_dir=tmp / "t7", on_slide=events.append,
-                        interval_sec=0.05, cooldown_sec=0.0)
+                        interval_sec=0.05, cooldown_sec=0.0,
+                        auto_capture_diff=0.02)
     det.capturer = FakeCapturer(frames)
     det.start()
     wait_until(lambda: len(events) >= 2, timeout=8)

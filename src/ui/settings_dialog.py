@@ -3,7 +3,7 @@
 
 v1.2 补齐需求 FR-08 中"已列出但未实现"的配置项：
 - ASR：设备(Device)、HF 镜像、静音阈值、最短/最长分段、pre-roll
-- 视觉：抓屏范围(区域)、内容区 ROI、diff_ratio 与 SSIM 阈值
+- 视觉：自动截图开关与页面变化率阈值、内容区 ROI、纯色帧阈值
 - 输出：音频存档开关、界面主题
 同时新增**离线重转写默认模型**（精度档模型选择）。
 
@@ -227,34 +227,29 @@ class SettingsDialog(QDialog):
         f2.addRow("宽 / 高（0~1）：", _row(self.roi_w, self.roi_h))
         lay.addWidget(roi_box)
 
-        detect = _section("翻页判据（阈值标定见 tests/test_vision_algo.py）")
+        detect = _section("截图方式")
         f3 = detect.layout()
+
+        # 自动截图开关在主界面（控制面板勾选框，录制中可随时切换）；
+        # 这里只提供阈值微调。
+        self.v_auto_diff = QDoubleSpinBox()
+        self.v_auto_diff.setRange(1.0, 100.0)
+        self.v_auto_diff.setSingleStep(1.0)
+        self.v_auto_diff.setDecimals(0)
+        self.v_auto_diff.setSuffix(" %")
+        self.v_auto_diff.setValue(
+            float(self.config.get("vision.auto_capture_diff", 0.10)) * 100.0)
+        f3.addRow("自动截图触发：页面变化率超过", self.v_auto_diff)
+
+        hint = QLabel("开关在主界面「自动截图」勾选框；手动截图始终可用")
+        hint.setStyleSheet("color:#888; font-size:11px;")
+        f3.addRow("", hint)
+
         self.v_interval = QDoubleSpinBox()
         self.v_interval.setRange(0.5, 5.0)
         self.v_interval.setSingleStep(0.5)
         self.v_interval.setValue(float(self.config.get("vision.interval_sec", 1.5)))
-        f3.addRow("抓屏间隔（秒）：", self.v_interval)
-
-        self.v_threshold = QDoubleSpinBox()
-        self.v_threshold.setRange(0.02, 0.6)
-        self.v_threshold.setSingleStep(0.01)
-        self.v_threshold.setDecimals(2)
-        self.v_threshold.setValue(float(self.config.get("vision.phash_threshold", 0.15)))
-        f3.addRow("① pHash 距离阈值（越大越迟钝）：", self.v_threshold)
-
-        self.v_min_diff = QDoubleSpinBox()
-        self.v_min_diff.setRange(0.0, 0.3)
-        self.v_min_diff.setSingleStep(0.005)
-        self.v_min_diff.setDecimals(3)
-        self.v_min_diff.setValue(float(self.config.get("vision.min_diff_ratio", 0.02)))
-        f3.addRow("② 差异像素占比下限（挡光标）：", self.v_min_diff)
-
-        self.v_ssim = QDoubleSpinBox()
-        self.v_ssim.setRange(0.5, 1.0)
-        self.v_ssim.setSingleStep(0.01)
-        self.v_ssim.setDecimals(2)
-        self.v_ssim.setValue(float(self.config.get("vision.ssim_threshold", 0.95)))
-        f3.addRow("③ SSIM 下限（挡亮度噪声）：", self.v_ssim)
+        f3.addRow("检测间隔（秒）：", self.v_interval)
 
         self.v_blank = QDoubleSpinBox()
         self.v_blank.setRange(0.0, 60.0)
@@ -479,12 +474,10 @@ class SettingsDialog(QDialog):
                                "w": self.roi_w.value(), "h": self.roi_h.value()}
                 if self.roi_enabled.isChecked() else None)
         cfg.set("vision.interval_sec", self.v_interval.value())
-        cfg.set("vision.phash_threshold", self.v_threshold.value())
-        cfg.set("vision.min_diff_ratio", self.v_min_diff.value())
-        cfg.set("vision.ssim_threshold", self.v_ssim.value())
         cfg.set("vision.backtrack_tol", self.v_backtrack.value())
         cfg.set("vision.blank_spread_threshold", self.v_blank.value())
         cfg.set("vision.cooldown_sec", self.v_cooldown.value())
+        cfg.set("vision.auto_capture_diff", self.v_auto_diff.value() / 100.0)
 
         cfg.set("llm.provider", self.llm_provider.currentData() or "custom")
         cfg.set("llm.base_url", self.llm_base.text().strip())

@@ -25,6 +25,13 @@ v1.2 改为 **pHash 主判据 + diff_ratio 确认 + SSIM 辅助** 的三层结�
 线程模型：所有截图与状态变更**只在检测线程内执行**。外部（如 UI 热键）
 通过 `request_capture()` 投递命令，由主循环消费——mss 实例非线程安全，
 跨线程直接调用会花屏甚至崩溃（原实现即为此缺陷）。
+
+截图模式（v1.3.1 起）：
+- **手动（默认）**：`auto_capture=False`，检测线程不做任何周期性截图，
+  只响应手动命令（F9 / 界面按钮）。线程仍在运行以保证手动响应 <100ms。
+- **自动**：勾选"自动截图"后开启，判定条件为**页面变化率**（差异像素占比）
+  超过阈值（默认 10%）才截图；光标/水印/弹幕级别的变化不触发。
+  自动模式下手动截图依然随时可用，两者互不影响。
 """
 from __future__ import annotations
 
@@ -51,6 +58,7 @@ DEFAULT_SSIM_THRESHOLD = 0.95     # SSIM 下限：高于此值判为"结构未�
 DEFAULT_BACKTRACK_TOL = 0.08# 与历史页判为同一页的 pHash 容差
 DEFAULT_COOLDOWN_SEC = 3.0
 DEFAULT_BLANK_SPREAD_TH = 10.0    # 明暗跨度下限：低于此值判为纯色过渡帧（黑屏/白屏）
+DEFAULT_AUTO_CAPTURE_DIFF = 0.10  # 自动截图触发：页面变化率超过 10% 才截
 
 # 连续截图失败多少次后熔断（防止无显示设备/会话销毁时无限刷 traceback）
 _MAX_CONSECUTIVE_ERRORS = 30
@@ -73,6 +81,8 @@ class SlideDetector(threading.Thread):
         min_diff_ratio: float = DEFAULT_MIN_DIFF_RATIO,
         ssim_threshold: float = DEFAULT_SSIM_THRESHOLD,
         blank_spread_threshold: float = DEFAULT_BLANK_SPREAD_TH,
+        auto_capture: bool = True,
+        auto_capture_diff: float = DEFAULT_AUTO_CAPTURE_DIFF,
         capture: str = "primary",
         region=None,
         monitor: int = 1,
@@ -102,6 +112,11 @@ class SlideDetector(threading.Thread):
         self.min_diff_ratio = float(min_diff_ratio)
         self.ssim_th = float(ssim_threshold)
         self.blank_spread_th = float(blank_spread_threshold)  # 纯色过渡帧判据
+        # 自动截图总开关：关（默认产品行为）= 全靠手动 F9/按钮，检测线程仍在
+        # 运行以响应手动命令，但不再做周期性自动截图。
+        # 开 = 页面变化率（diff_ratio）超过 auto_capture_diff 时自动截图。
+        self.auto_capture = bool(auto_capture)
+        self.auto_capture_diff = min(1.0, max(0.01, float(auto_capture_diff)))
         self.roi = roi            # (x, y, w, h) 归一化内容区，排除播放器控制栏
         self.record_backtrack = bool(record_backtrack)  # 翻回是否记入时间轴（默认不记）
         self.get_time = get_time or (lambda: time.time())
@@ -207,10 +222,14 @@ class SlideDetector(threading.Thread):
 
     # ---------- 核心判定 ----------
     def _tick(self) -> None:
+        self.stats_counter["ticks"] += 1
+        if not self.auto_capture:
+            # 自动截图关闭：全靠手动（F9 / 界面按钮 → request_capture 命令），
+            # 周期性抓屏比对完全跳过。检测线程保持运行以保证手动截图 <100ms 响应。
+            return
         small = self.capturer.grab_small(self.small_width)
         gray = self._apply_roi(bgra_to_gray(small))
         rec_ts = self.get_time()
-        self.stats_counter["ticks"] += 1
 
         # 纯色过渡帧（切页/加载时的全黑屏、全白屏、淡入淡出中间灰）：
         # 既不判翻页，也**不更新基准帧**——保持上一页的基准，
@@ -241,32 +260,17 @@ class SlideDetector(threading.Thread):
             self._armed = True
             return
 
-        bd, bp = self._baseline_sig
-        d_dist, p_dist = hamming(sig[0], bd), hamming(sig[1], bp)
-
-        # 第一层：pHash 主判据（dHash 不再参与"或"判定，抗噪性不足）
-        if p_dist < self.change_th and d_dist < self.change_th * 1.5:
-            return
-
-        # 第二层：diff_ratio 确认像素变化量（挡掉光标/水印/弹幕/轻微动画）
+        # 自动截图主判据：**页面变化率**（差异像素占比）超过阈值才截图。
+        # 光标移动/水印/弹幕（<1%）不会触发；翻页/滚动/大段标注（>10%）会触发。
         diff = diff_ratio(self._baseline_gray, gray)
-        if diff < self.min_diff_ratio:
-            self.stats_counter["rejected_cursor"] += 1
+        if diff < self.auto_capture_diff:
             self._baseline_sig = sig          # 以当前帧为新基准，避免反复比对同一旧帧
             self._baseline_gray = gray
             return
 
-        # 第三层：SSIM 结构复核（挡掉"整体亮度变化但内容相同"）
-        s = ssim(self._baseline_gray, gray)
-        if s > self.ssim_th:
-            self.stats_counter["rejected_noise"] += 1
-            self._baseline_sig = sig
-            self._baseline_gray = gray
-            return
+        logger.debug(f"自动截图候选 diff={diff:.3f} ≥ {self.auto_capture_diff:.2f}")
 
-        logger.debug(f"翻页候选 pHash={p_dist:.3f} diff={diff:.3f} ssim={s:.3f}")
-
-        # 翻回历史页？
+        # 翻回历史页？（翻回时去重，避免逐字稿里出现重复小节）
         hit = self._is_backtrack(sig)
         if hit:
             idx, img = hit

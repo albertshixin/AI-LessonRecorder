@@ -1,6 +1,6 @@
 # 在线课程录播器（AI LessonRecorder）
 
-![版本](https://img.shields.io/badge/version-1.3.0-brightgreen) ![平台](https://img.shields.io/badge/platform-Windows-informational) ![Python](https://img.shields.io/badge/Python-3.11%2B-green)
+![版本](https://img.shields.io/badge/version-1.3.1-brightgreen) ![平台](https://img.shields.io/badge/platform-Windows-informational) ![Python](https://img.shields.io/badge/Python-3.11%2B-green)
 
 一款 Windows 桌面端软件，用于录制在线视频课程，自动将课程音频实时转成带时间戳的逐字稿（Markdown），同时智能检测 PPT 页面翻页并截取截图、按时间戳插入到逐字稿中，最终借助 AI 将逐字稿梳理归纳为结构化的课程教程文档，并可导出为图文并茂的 Word 文档。
 
@@ -125,6 +125,18 @@ AI 梳理后的教程文档结构示意：
 - AI 梳理总结功能需在设置中填入大语言模型 API Key
 
 ## 更新日志
+
+### v1.3.1（2026-11-23）
+- **截图模式重构**：默认全靠手动截图（F9 / 界面按钮）；「自动截图」开关移到
+  主界面（控制面板勾选框），录制中随时切换、即时生效并记住选择；
+  自动模式下**页面变化率超过 10%**（设置里可调）才截图——翻页/滚动/大段标注
+  触发，光标/水印/弹幕不触发；两种模式互不影响
+- **修复主窗口无法收窄**：底部热键说明允许换行、状态栏改短标签（完整路径
+  移入悬停提示），窗口最小宽度从被长文本顶死降回 632px
+- **修复「关于」窗口点不开**：槽函数缺 `QHBoxLayout` 导入导致 NameError 被
+  Qt 吞掉；「关于」页加入开发者信息与微信二维码（购买/合作联系入口）
+- 新增随软件安装的《使用说明》（帮助菜单打开，图文含 FAQ 与联系方式）
+- 测试体系扩充至 14 套（自动/手动截图模式、分发资源与关于窗口回归）
 
 ### v1.3.0（2026-11-22）
 - **修复录制中停止后再开始卡死**：根因是 CUDA 探测失败后二次重试会死锁在

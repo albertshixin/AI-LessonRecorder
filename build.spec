@@ -31,6 +31,10 @@ if _fw:
 datas += collect_data_files("loguru")
 # zhconv 简繁转换字典（zhcdict.json 缺失会导致转换静默失败，输出仍为繁体）
 datas += collect_data_files("zhconv")
+# 项目自带资源：使用说明文档 + 微信二维码（随软件安装到本地，帮助菜单可打开）
+_assets = PROJECT / "assets"
+if _assets.exists():
+    datas.append((str(_assets), "assets"))
 
 a = Analysis(
     [str(PROJECT / "main.py")],

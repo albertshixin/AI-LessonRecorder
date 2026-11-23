@@ -21,9 +21,10 @@ from typing import Callable
 
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import (QApplication, QLabel, QMainWindow,
-                               QMessageBox, QProgressDialog, QSplitter,
-                               QStatusBar, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel,
+                               QMainWindow, QMessageBox, QProgressDialog,
+                               QPushButton, QSplitter, QStatusBar,
+                               QVBoxLayout, QWidget)
 
 from src.ai.asr.model_manager import MODEL_SIZE_HINT_MB, ModelManager
 from src.ai.asr.offline_retranscribe import OfflineRetranscriber
@@ -174,6 +175,11 @@ class MainWindow(QMainWindow):
         m_set.addAction(act_cfg)
 
         m_help = self.menuBar().addMenu("帮助(&H)")
+        act_manual = QAction("使用说明", self)
+        act_manual.setToolTip("打开随软件安装到本地的图文使用说明（浏览器打开）")
+        act_manual.triggered.connect(self._open_manual)
+        m_help.addAction(act_manual)
+        m_help.addSeparator()
         act_keys = QAction("快捷键", self)
         act_keys.triggered.connect(self._show_hotkeys)
         act_about = QAction("关于", self)
@@ -201,6 +207,9 @@ class MainWindow(QMainWindow):
         lay.addWidget(splitter, stretch=1)
 
         self.hotkey_label = QLabel("")
+        # 必须允许换行：QLabel 不换行时 minimumSizeHint = 整行文字宽度，
+        # 曾把主窗口最小宽度顶到热键说明一行那么宽，导致窗口无法收窄。
+        self.hotkey_label.setWordWrap(True)
         self.hotkey_label.setStyleSheet(
             "color:#888; font-size:11px; padding:0 12px 6px 12px;")
         lay.addWidget(self.hotkey_label)
@@ -224,13 +233,19 @@ class MainWindow(QMainWindow):
         self.refresh_status_paths()
 
     def refresh_status_paths(self) -> None:
-        """配置变更后刷新状态栏（设置保存后调用）"""
+        """配置变更后刷新状态栏（设置保存后调用）
+
+        只显示短标签：完整路径放在 tooltip。
+        状态栏永久部件的宽度会顶高主窗口最小宽度——带完整路径的长文本
+        曾让窗口"只能拉长、无法调短"。
+        """
         out = self.ctx.config.output_root
         cfg = self.ctx.config.path
         self._status_paths.setText(
-            f'📁 <a href="out" style="color:#444;text-decoration:none;">输出：{out}</a>'
-            f'　'
-            f'⚙ <a href="cfg" style="color:#444;text-decoration:none;">配置：{cfg}</a>')
+            '<a href="out" style="color:#444;text-decoration:none;">📁 输出目录</a>'
+            '　'
+            '<a href="cfg" style="color:#444;text-decoration:none;">⚙ 配置文件</a>')
+        self._status_paths.setToolTip(f"输出目录：{out}\n配置文件：{cfg}")
 
     def _on_status_link(self, href: str) -> None:
         if href == "out":
@@ -264,6 +279,19 @@ class MainWindow(QMainWindow):
         self.control.resume_requested.connect(self.manager.resume)
         self.control.stop_requested.connect(self._stop_recording)
         self.control.screenshot_requested.connect(self._force_shot)
+        self.control.auto_capture_toggled.connect(self._on_auto_capture_toggled)
+        # 初始勾选态来自配置（主界面开关，设置里不再提供）
+        self.control.set_auto_capture_checked(
+            bool(self.ctx.config.get("vision.auto_capture", False)))
+
+    def _on_auto_capture_toggled(self, on: bool) -> None:
+        """自动截图开关：即时生效 + 写回配置（下次启动沿用）"""
+        self.ctx.config.set("vision.auto_capture", bool(on))
+        self.ctx.config.save()
+        self.manager.set_auto_capture(bool(on))
+        self.statusBar().showMessage(
+            "已开启自动截图（页面变化率超阈值时自动保存）" if on
+            else "已关闭自动截图（全靠手动截图 F9）")
 
     def _wire_bus(self) -> None:
         bus = self.manager.bus
@@ -631,13 +659,62 @@ class MainWindow(QMainWindow):
             "若某个热键被其他程序占用，会退回为仅界面按钮可用"
             "（启动日志与本窗口底部会提示）。")
 
+    def _open_manual(self) -> None:
+        """打开随软件安装到本地的使用说明（HTML，浏览器渲染）"""
+        from src.utils.fsutil import open_file, resource_path
+        manual = resource_path("assets/user_manual.html")
+        if open_file(str(manual)):
+            return
+        # 资源缺失（如手工删除）：退而求其次，打开所在目录
+        QMessageBox.warning(
+            self, "使用说明缺失",
+            f"未找到使用说明文件：\n{manual}\n\n"
+            "可能是安装目录被精简过，请重新解压完整安装包。")
+
     def _show_about(self) -> None:
-        QMessageBox.about(
-            self, "关于",
-            "<b>在线课程录播器（AI LessonRecorder）v1.2</b><br><br>"
-            "录制系统声音 → 实时转文字 → PPT 翻页自动截图 →<br>"
+        from src.utils.fsutil import resource_path
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("关于 在线课程录播器")
+        lay = QVBoxLayout(dlg)
+        lay.setSpacing(12)
+
+        intro = QLabel(
+            "<b>在线课程录播器（AI LessonRecorder）</b><br>"
+            "录制系统声音 → 实时转文字 → 课程截图 →<br>"
             "生成图文逐字稿 MD / Word → AI 梳理成结构化教程文档<br><br>"
             "双档转写：录制时小模型保实时，课后离线大模型保准确率")
+        intro.setTextFormat(Qt.RichText)
+        intro.setWordWrap(True)
+        lay.addWidget(intro)
+
+        dev = QLabel(
+            "<b>开发者：Albert 老石</b><br>"
+            "如需<b>购买、功能定制、批量部署或其他合作</b>，欢迎扫码加微信洽谈")
+        dev.setTextFormat(Qt.RichText)
+        dev.setWordWrap(True)
+        lay.addWidget(dev)
+
+        from PySide6.QtGui import QPixmap
+        qr_path = resource_path("assets/wechat_qr.png")
+        if qr_path.exists():
+            row = QHBoxLayout()
+            pic = QLabel()
+            pic.setPixmap(QPixmap(str(qr_path)).scaled(
+                160, 160, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            pic.setToolTip("微信二维码（右键菜单暂不支持保存，可截图）")
+            row.addStretch(1)
+            row.addWidget(pic)
+            row.addStretch(1)
+            lay.addLayout(row)
+        else:
+            logger.warning(f"关于页二维码缺失: {qr_path}")
+
+        btn = QPushButton("关闭")
+        btn.clicked.connect(dlg.accept)
+        lay.addWidget(btn, 0, Qt.AlignCenter)
+        dlg.setMinimumWidth(360)
+        dlg.exec()
 
     # ================= 关闭保护 =================
     def closeEvent(self, event) -> None:

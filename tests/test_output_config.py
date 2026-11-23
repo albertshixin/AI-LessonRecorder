@@ -172,8 +172,13 @@ def test_main_window_status_paths(tmp: Path) -> None:
               f"状态栏链接同时含 输出/配置（{text!r}）")
         check("href=\"out\"" in text and "href=\"cfg\"" in text,
               "状态栏链接含 out/cfg href")
-        check(str(cfg.output_root) in text, "链接展示实际输出目录绝对路径")
-        check(str(cfg.path) in text, "链接展示实际配置文件绝对路径")
+        # 完整路径改放 tooltip：状态栏永久部件的文本宽度曾把主窗口最小宽度
+        # 顶死，导致窗口"只能拉长、无法调短"（缺陷回归断言）
+        tip = win._status_paths.toolTip()
+        check(str(cfg.output_root) in tip, "tooltip 含实际输出目录绝对路径")
+        check(str(cfg.path) in tip, "tooltip 含实际配置文件绝对路径")
+        check(str(cfg.output_root) not in text and str(cfg.path) not in text,
+              "链接文本不含长路径（不顶高窗口最小宽度）")
     finally:
         # 绕开 QMainWindow.closeEvent 触发的清理（我们没跑完整 __init__）
         from PySide6.QtGui import QCloseEvent

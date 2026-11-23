@@ -33,6 +33,8 @@ SUITES = [
     ("输出目录与本地配置", "test_output_config.py", False),
     ("停止后重新录制（含重名序号）", "test_restart.py", False),
     ("音频设备断开（蓝牙断连）自愈", "test_audio_device_loss.py", False),
+    ("自动/手动截图模式", "test_auto_capture.py", False),
+    ("随软件分发资源（使用说明/二维码）", "test_resources.py", False),
     ("实时分段 VAD + 离线静音切分", "test_segmentation.py", False),
     ("UI 冒烟（offscreen 构建与信号链路）", "test_ui_smoke.py", False),
     ("模型下载流程与 UI 构建", "test_download.py", False),

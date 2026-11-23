@@ -40,6 +40,8 @@ DEFAULTS: dict = {
         "cloud": {"base_url": "https://api.openai.com/v1", "api_key": "", "model": "whisper-1"},
     },
     "vision": {
+        "auto_capture": False,         # 自动截图总开关：默认关（全靠手动 F9/按钮）
+        "auto_capture_diff": 0.10,     # 自动截图触发：页面变化率超过 10% 才截
         "interval_sec": 1.5,
         # 三层判据阈值（标定依据见 tests/test_vision_algo.py）
         "phash_threshold": 0.15,       # pHash 距离：超过视为"可能是另一页"
